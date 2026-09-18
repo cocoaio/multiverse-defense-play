@@ -14,9 +14,10 @@ function ensureImageLoaded(image) {
 }
 
 const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp");
-const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp", true);
+const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp");
+const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", true);
 const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp");
-const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v2.webp");
+const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v3.png");
 const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp");
 const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp");
 const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true);
@@ -35,7 +36,7 @@ const sceneHeroAtlases = { city: cityHeroAtlas, snow: snowHeroAtlas, hospital: h
 function ensureSceneAssets(sceneId) {
   ensureImageLoaded(battlefieldTextures[sceneId]);
   ensureImageLoaded(sceneHeroAtlases[sceneId]);
-  ensureImageLoaded(sceneId === "cultivation" ? cultivatorEnemyAtlas : enemyAtlas);
+  ensureImageLoaded(sceneId === "cultivation" ? cultivatorEnemyAtlas : sceneId === "city" ? cityZombieAtlas : enemyAtlas);
 }
 const W = 390;
 const H = 844;
@@ -333,11 +334,11 @@ const skinDefinitions = [
   { id: "void", name: "虚空星痕", detail: "紫曜星环与深空余辉 · 解锁近地轨道", primary: "#e4c4ff", secondary: "#895cff", price: 680, tier: 2, motif: "orbit", unlockScene: "orbit" },
   { id: "ember", name: "赤霄战意", detail: "赤金焰纹与爆燃星芒 · 解锁火星前哨", primary: "#ffcf6b", secondary: "#ff5d52", price: 880, tier: 2, motif: "flare", unlockScene: "mars" },
   { id: "lunar", name: "月蚀圣辉", detail: "银白月轮与引力光带 · 解锁月面遗迹", primary: "#f4f0ff", secondary: "#8f8bff", price: 1080, tier: 3, motif: "eclipse", unlockScene: "moon" },
-  { id: "immortal", name: "太虚仙辉", detail: "多层剑印与仙光长虹 · 解锁太虚仙域", primary: "#eaffd6", secondary: "#7df2c3", price: 1380, tier: 3, motif: "sigil", unlockScene: "cultivation" },
+  { id: "immortal", name: "太虚仙辉", detail: "多层剑印、仙光长虹与专属大招外观", primary: "#eaffd6", secondary: "#7df2c3", price: 1380, tier: 3, motif: "sigil" },
   { id: "jade_avatar", name: "青霄流光", detail: "活动青蓝配色，不附加额外造型特效", primary: "#8fffd2", secondary: "#42bfff", price: null, tier: 0 },
 ];
 
-const sceneSkinRequirements = { snow: "frost", hospital: "antibody", orbit: "void", mars: "ember", moon: "lunar", cultivation: "immortal" };
+const sceneSkinRequirements = { snow: "frost", hospital: "antibody", orbit: "void", mars: "ember", moon: "lunar" };
 const classGearPrefixes = { melee: "先锋", ranger: "猎隼", mage: "秘术" };
 const divineGearDefinitions = {
   melee: { icon: "⚔", name: "天罚战神核心", attack: "裁决武装" },
@@ -564,6 +565,7 @@ function getCombatPower(classId = selectedRunClass) {
 function getSceneRequirement(index) {
   if (index <= 0 || QA_MODE || ADMIN_MODE) return null;
   const scene = scenes[index];
+  if (scene.endless) return null;
   const skinId = sceneSkinRequirements[scene.id];
   const skin = skinDefinitions.find((entry) => entry.id === skinId);
   return { scene, skin, previous: scenes[index - 1], chapterReady: (meta.progress[scenes[index - 1].id] || 0) >= LEVELS_PER_SCENE, skinReady: Boolean(skin && meta.skins.owned.includes(skin.id)) };
@@ -820,6 +822,7 @@ function getLevelModifier(level) {
 
 function isSceneUnlocked(index) {
   if (index <= 0 || QA_MODE || ADMIN_MODE) return true;
+  if (scenes[index]?.endless) return true;
   const requirement = getSceneRequirement(index);
   return Boolean(requirement?.chapterReady && requirement?.skinReady);
 }
@@ -839,7 +842,8 @@ function makeGame(runType = "main") {
   const resonance = getGearResonance(combatClass.id);
   const divineState = getDivineGearState(combatClass.id);
   const divine = divineState.unlocked ? getDivineGearCombatStats(divineState.level, selectedSceneIndex) : { damage: 0, health: 0, crit: 0, pulse: 0 };
-  const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health));
+  const endlessNoviceGrace = scene.endless ? Math.max(0, Math.min(1, (360 - getCombatPower(combatClass.id)) / 260)) : 0;
+  const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health) * (1 + endlessNoviceGrace * .45));
   const isDivineTutorialStage = selectedSceneIndex === 0 && missionLevel <= 2;
   const shouldDeliverDivineGear = runType === "main" && isDivineTutorialStage && !divineState.unlocked;
   return {
@@ -849,6 +853,7 @@ function makeGame(runType = "main") {
     levelModifier,
     runType,
     difficulty: runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
+    endlessNoviceGrace,
     waveSeconds: QA_MODE ? 2 : runType === "resource" ? 8.5 : 11.5 + Math.min(2.5, missionLevel * 0.22),
     elapsed: 0,
     wave: 1,
@@ -898,11 +903,11 @@ function makeGame(runType = "main") {
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
-    banner: { text: runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : `${combatClass.name} · 指向移动，靠近拾取经验`, time: 2.3 },
+    banner: { text: runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · 初入仙域获得护道加持，随重天逐步解除` : `${combatClass.name} · 指向移动，靠近拾取经验`, time: 2.3 },
     player: {
       weapon,
       combatClass,
-      damage: 21 * (1 + meta.upgrades.damage * 0.07) * (1 + gear.damage) * (1 + resonance.damage) * (1 + divine.damage) * combatClass.damage * (scene.endless && combatClass.id === "ranger" ? 1.38 : 1),
+      damage: 21 * (1 + meta.upgrades.damage * 0.07) * (1 + gear.damage) * (1 + resonance.damage) * (1 + divine.damage) * combatClass.damage * (scene.endless && combatClass.id === "ranger" ? 1.38 : 1) * (1 + endlessNoviceGrace * .35),
       fireInterval: 0.53 * combatClass.interval * (1 - Math.min(.35, gear.haste)) * (scene.endless && combatClass.id === "ranger" ? 1.58 : 1),
       bulletCount: combatClass.count,
       pierce: combatClass.pierce,
@@ -1420,7 +1425,8 @@ function pickEnemyType() {
 
 function enemyStats(type) {
   const pressureScale = game.scene.endless ? 1 + (game.wave - 1) * .085 + game.elapsed * .0006 : 1 + (game.wave - 1) * 0.18 + game.elapsed * 0.0015;
-  const hpScale = pressureScale * game.difficulty * game.levelModifier.hp;
+  const endlessOpeningScale = game.scene.endless ? (.72 + Math.min(.28, (game.wave - 1) * .04)) * (1 - game.endlessNoviceGrace * .1) : 1;
+  const hpScale = pressureScale * game.difficulty * game.levelModifier.hp * endlessOpeningScale;
   const palette = game.scene.palette;
   const entries = {
     grunt: { hp: 68, speed: 38, size: 21, damage: 8, reward: 2, xp: 8, color: palette[0] },
@@ -1436,7 +1442,7 @@ function enemyStats(type) {
   const divineFinaleGate = type === "boss" && game.sceneIndex === 0 && game.missionLevel === LEVELS_PER_SCENE && !getDivineGearState(game.player.combatClass.id).unlocked;
   const bossScale = game.difficulty * (game.missionLevel === LEVELS_PER_SCENE ? 1.28 : 1) * (divineFinaleGate ? 2.55 : 1);
   const realmOffset = game.scene.endless
-    ? type === "boss" ? Math.floor(rand(2, 5)) : Math.random() < .07 ? Math.floor(rand(2, 5)) : Math.floor(rand(-1, 2))
+    ? type === "boss" ? (game.wave <= 5 ? 1 : Math.floor(rand(1, 4))) : game.wave >= 6 && Math.random() < .07 ? Math.floor(rand(2, 5)) : Math.floor(rand(-1, 2))
     : 0;
   const realm = game.scene.endless ? Math.max(1, game.player.level + realmOffset) : 1;
   const realmGap = game.scene.endless ? realm - game.player.level : 0;
@@ -1444,9 +1450,9 @@ function enemyStats(type) {
     ? (1 + (realm - 1) * .075) * Math.pow(1.48, Math.max(0, realmGap)) * Math.pow(.87, Math.max(0, -realmGap))
     : 1;
   const adaptiveScale = .62 + game.director * .46;
-  const health = Math.round(base.hp * (type === "boss" ? bossScale : hpScale) * realmScale * adaptiveScale);
+  const health = Math.round(base.hp * (type === "boss" ? bossScale : hpScale) * realmScale * adaptiveScale * (game.scene.endless && type === "boss" ? endlessOpeningScale : 1));
   const damageScale = game.scene.endless ? Math.pow(1.3, Math.max(0, realmGap)) : Math.sqrt(realmScale);
-  const damage = Math.round(base.damage * damageScale * (.68 + game.director * .38) * (divineFinaleGate ? 1.55 : 1));
+  const damage = Math.round(base.damage * damageScale * (.68 + game.director * .38) * (divineFinaleGate ? 1.55 : 1) * endlessOpeningScale);
   return { ...base, realm, divineFinaleGate, speed: base.speed * game.levelModifier.speed * (game.scene.endless ? Math.min(1.36, 1 + Math.max(0, realmGap) * .055) : 1), damage, hp: health, maxHp: health };
 }
 
@@ -3996,6 +4002,7 @@ function drawEnemy(enemy) {
   ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06));
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
+  else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, frozen);
   else if (enemyAtlas.complete && enemyAtlas.naturalWidth) drawAtlasEnemy(enemy, s, frozen);
   else {
     if (game.scene.id === "city" || game.scene.id === "snow") drawHumanoidEnemy(enemy, s, frozen, game.scene.id === "snow");
@@ -4031,6 +4038,33 @@ function drawEnemy(enemy) {
     ctx.font = "700 7px system-ui"; ctx.textAlign = "center";
     ctx.fillText(getRealmName(enemy.realm), enemy.x, enemy.y - s * (enemy.type === "boss" ? 2.26 : 2.76));
   }
+}
+
+function drawCityZombieEnemy(enemy, s, frozen) {
+  const variants = { grunt: 0, shield: 1, runner: 2, mini: 2, tank: 3, splitter: 3, ranged: 4, caster: 4, boss: 5 };
+  const variant = variants[enemy.type] ?? 0;
+  const sourceWidth = cityZombieAtlas.naturalWidth / 6;
+  const stride = Math.sin(game.elapsed * (enemy.type === "runner" ? 13 : 7) + enemy.sway);
+  const scale = enemy.type === "boss" ? 1.08 : enemy.type === "tank" ? 1.03 : enemy.type === "mini" ? .72 : 1;
+  const width = s * 2.42 * scale;
+  const height = s * 3.28 * scale;
+  ctx.save();
+  ctx.translate(stride * s * .075, -Math.abs(stride) * s * .055);
+  ctx.rotate(stride * (enemy.type === "runner" ? .075 : .025));
+  if (frozen) ctx.filter = "saturate(.45) hue-rotate(145deg) brightness(1.18)";
+  if (enemy.flash > 0) ctx.filter = "brightness(2.25) saturate(.22)";
+  ctx.drawImage(cityZombieAtlas, sourceWidth * variant, 0, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height);
+  ctx.filter = "none";
+  if (enemy.type === "runner") {
+    ctx.strokeStyle = "rgba(180,235,220,.46)"; ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i += 1) { ctx.beginPath(); ctx.moveTo(-width * .3 - i * 7, height * .13 + i * 4); ctx.lineTo(-width * .56 - i * 10, height * .15 + i * 4); ctx.stroke(); }
+  }
+  if (enemy.type === "boss") {
+    const aura = ctx.createRadialGradient(0, 0, s * .35, 0, 0, s * 1.55);
+    aura.addColorStop(0, "rgba(255,74,46,0)"); aura.addColorStop(1, "rgba(255,74,46,.28)");
+    ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, 0, s * 1.55, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawAtlasEnemy(enemy, s, frozen) {

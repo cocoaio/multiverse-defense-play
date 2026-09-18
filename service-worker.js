@@ -1,7 +1,7 @@
-const CACHE_NAME = "multiverse-defense-v40";
+const CACHE_NAME = "multiverse-defense-v41";
 const ASSETS = [
-  "./", "./index.html", "./styles.css?v=40", "./game.js?v=40", "./manifest.webmanifest", "./icon.svg",
-  "./assets/city-battlefield-v1.webp", "./assets/posters/original/city-heroes-v1.webp", "./assets/enemy-worlds-v1.webp",
+  "./", "./index.html", "./styles.css?v=41", "./game.js?v=41", "./manifest.webmanifest", "./icon.svg",
+  "./assets/city-battlefield-v1.webp", "./assets/posters/original/city-heroes-v1.webp", "./assets/city-zombies-v2.png",
 ];
 
 self.addEventListener("install", (event) => {
