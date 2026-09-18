@@ -16,12 +16,31 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" />
     <title>多元防线</title>
-    <script>if (/MicroMessenger|MQQBrowser|UCBrowser|baiduboxapp|Android/i.test(navigator.userAgent)) document.documentElement.classList.add("compat-assets");</script>
-    <link rel="stylesheet" href="./styles.css?v=45" />
+    <script>
+      const lowPower = location.protocol === "file:" || /MicroMessenger|MQQBrowser|UCBrowser|baiduboxapp|Android/i.test(navigator.userAgent)
+        || (navigator.deviceMemory && navigator.deviceMemory <= 4)
+        || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+      if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
+    </script>
+    <link rel="stylesheet" href="./styles.css?v=46" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
       <canvas id="game" width="390" height="844" aria-label="游戏画面"></canvas>
+
+      <section id="loadingScreen" class="screen loading-screen" aria-live="polite">
+        <div class="loading-emblem" aria-hidden="true"><i></i><b>界</b><span></span></div>
+        <p>SEVEN WORLDS · ONLINE ASSET STREAM</p>
+        <h1>多元防线</h1>
+        <div class="loading-status">
+          <div class="loading-copy"><span id="loadingLabel">正在检测设备性能</span><b id="loadingPercent">0%</b></div>
+          <div class="loading-track"><i id="loadingFill"></i></div>
+          <div class="loading-bytes"><span id="loadingBytes">0.00 / 0.00 MB</span><em id="loadingProfile">自动画质</em></div>
+        </div>
+        <p class="loading-note">地图、独立角色、敌人与宠物全部就绪后才会进入。仅使用本次在线加载，不建立离线资源缓存。</p>
+        <button id="loadingRetry" class="loading-retry hidden">重新加载失败资源</button>
+        <a class="offline-download" href="./downloads/multiverse-defense-offline-v46.zip" download>下载本地试玩包 <small>弱网备用</small></a>
+      </section>
 
       <section id="loginScreen" class="screen login-screen" aria-label="登录多元防线">
         <div class="login-art" aria-hidden="true">
@@ -146,6 +165,7 @@
             <button data-retention-panel="daily"><i>✓</i><span>每日任务</span><em id="dailyRailBadge">0/4</em></button>
             <button data-retention-panel="events"><i>◆</i><span>限时活动</span><em id="eventRailBadge">可领取</em></button>
             <button data-retention-panel="dungeon"><i>⌁</i><span>丰饶之境</span><em id="dungeonRailBadge">3/3</em></button>
+            <button data-retention-panel="petDungeon"><i>狐</i><span>灵宠试炼</span><em id="petDungeonRailBadge">第三章</em></button>
             <button data-retention-panel="skins"><i>✦</i><span>商城</span><em id="skinRailBadge">新品</em></button>
           </aside>
         </div>
@@ -189,6 +209,7 @@
             <div class="pet-hangar">
               <div class="inventory-title"><span>随行宠物</span><small>每局自动出战 · 可随时切换</small></div>
               <div id="petRoster" class="pet-roster"></div>
+              <button id="petDungeonShortcut" class="pet-dungeon-shortcut">前往灵宠试炼 <span>第三章通关后开放 ›</span></button>
             </div>
             <div class="wardrobe-preview">
               <canvas id="armoryAvatarPreview" width="320" height="176" aria-label="当前角色换装预览"></canvas>
@@ -293,6 +314,6 @@
       </section>
     </main>
 
-    <script type="module" src="./game.js?v=45"></script>
+    <script defer src="./game.js?v=46"></script>
   </body>
 </html>

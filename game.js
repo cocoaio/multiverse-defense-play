@@ -1,6 +1,9 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const COMPAT_ASSET_MODE = /MicroMessenger|MQQBrowser|UCBrowser|baiduboxapp|Android/i.test(navigator.userAgent);
+const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
+  || (navigator.deviceMemory && navigator.deviceMemory <= 4)
+  || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+const COMPAT_ASSET_MODE = LOW_POWER_DEVICE || location.protocol === "file:";
 function createAssetImage(src, eager = false, fallbackSrc = "") {
   const image = new Image();
   image.decoding = "async";
@@ -61,29 +64,185 @@ function waitForAsset(image, timeout = 8500) {
 
 const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp", false, "./assets/fallback/posters/original/hero-archetypes-v1.png");
 const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp", false, "./assets/fallback/enemy-worlds-v1.png");
-const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", true, "./assets/fallback/city-zombies-v2.png");
+const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", false, "./assets/fallback/city-zombies-v2.png");
 const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp", false, "./assets/fallback/posters/original/cultivator-heroes-v1.png");
 const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v3.png", false, "./assets/fallback/cultivator-enemies-v3.png");
 const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp", false, "./assets/fallback/posters/original/hospital-heroes-v1.png");
 const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp", false, "./assets/fallback/hospital-battlefield-v1.jpg");
-const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true, "./assets/fallback/city-battlefield-v1.jpg");
+const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", false, "./assets/fallback/city-battlefield-v1.jpg");
 const snowBattlefield = createAssetImage("./assets/snow-battlefield-v1.webp", false, "./assets/fallback/snow-battlefield-v1.jpg");
 const orbitBattlefield = createAssetImage("./assets/orbit-battlefield-v1.webp", false, "./assets/fallback/orbit-battlefield-v1.jpg");
 const marsBattlefield = createAssetImage("./assets/mars-battlefield-v1.webp", false, "./assets/fallback/mars-battlefield-v1.jpg");
 const moonBattlefield = createAssetImage("./assets/moon-battlefield-v1.webp", false, "./assets/fallback/moon-battlefield-v1.jpg");
 const cultivationBattlefield = createAssetImage("./assets/cultivation-battlefield-v1.webp", false, "./assets/fallback/cultivation-battlefield-v1.jpg");
-const cityHeroAtlas = createAssetImage("./assets/posters/original/city-heroes-v1.webp", true, "./assets/fallback/posters/original/city-heroes-v1.png");
+const cityHeroAtlas = createAssetImage("./assets/posters/original/city-heroes-v1.webp", false, "./assets/fallback/posters/original/city-heroes-v1.png");
 const snowHeroAtlas = createAssetImage("./assets/posters/original/snow-heroes-v1.webp", false, "./assets/fallback/posters/original/snow-heroes-v1.png");
 const orbitShipAtlas = createAssetImage("./assets/posters/original/orbit-ships-v1.webp", false, "./assets/fallback/posters/original/orbit-ships-v1.png");
 const marsHeroAtlas = createAssetImage("./assets/posters/original/mars-heroes-v1.webp", false, "./assets/fallback/posters/original/mars-heroes-v1.png");
 const moonHeroAtlas = createAssetImage("./assets/posters/original/moon-heroes-v1.webp", false, "./assets/fallback/posters/original/moon-heroes-v1.png");
-const companionAtlas = createAssetImage("./assets/companions-v1.png", true);
+const companionAtlas = createAssetImage("./assets/companions-v1.png", false);
 const battlefieldTextures = { city: cityBattlefield, snow: snowBattlefield, hospital: hospitalBattlefield, orbit: orbitBattlefield, mars: marsBattlefield, moon: moonBattlefield, cultivation: cultivationBattlefield };
 const sceneHeroAtlases = { city: cityHeroAtlas, snow: snowHeroAtlas, hospital: hospitalHeroAtlas, orbit: orbitShipAtlas, mars: marsHeroAtlas, moon: moonHeroAtlas, cultivation: cultivatorHeroAtlas };
+const heroClassIds = ["melee", "ranger", "mage"];
+const sceneIds = ["city", "snow", "hospital", "orbit", "mars", "moon", "cultivation"];
+const sceneHeroSprites = Object.fromEntries(sceneIds.map((sceneId) => [sceneId, Object.fromEntries(heroClassIds.map((classId) => [classId, createAssetImage(`./assets/characters/${sceneId}/${classId}.png`)]))]));
+const assetResolvedUrls = new Map();
+
+const BOOT_ASSET_SIZES = {
+  "./assets/fallback/city-battlefield-v1.jpg": 328073, "./assets/fallback/cultivation-battlefield-v1.jpg": 370407,
+  "./assets/fallback/hospital-battlefield-v1.jpg": 273070, "./assets/fallback/mars-battlefield-v1.jpg": 343644,
+  "./assets/fallback/moon-battlefield-v1.jpg": 429205, "./assets/fallback/orbit-battlefield-v1.jpg": 313647,
+  "./assets/fallback/snow-battlefield-v1.jpg": 330866, "./assets/fallback/enemy-worlds-v1.png": 84805,
+  "./assets/fallback/city-zombies-v2.png": 89224, "./assets/fallback/cultivator-enemies-v3.png": 92419,
+  "./assets/companions-v1.png": 126258,
+  "./assets/characters/city/melee.png": 210289, "./assets/characters/city/ranger.png": 168452, "./assets/characters/city/mage.png": 215336,
+  "./assets/characters/snow/melee.png": 186842, "./assets/characters/snow/ranger.png": 148178, "./assets/characters/snow/mage.png": 167037,
+  "./assets/characters/hospital/melee.png": 138859, "./assets/characters/hospital/ranger.png": 120009, "./assets/characters/hospital/mage.png": 141436,
+  "./assets/characters/orbit/melee.png": 116728, "./assets/characters/orbit/ranger.png": 84694, "./assets/characters/orbit/mage.png": 123872,
+  "./assets/characters/mars/melee.png": 219892, "./assets/characters/mars/ranger.png": 179968, "./assets/characters/mars/mage.png": 201433,
+  "./assets/characters/moon/melee.png": 217666, "./assets/characters/moon/ranger.png": 155638, "./assets/characters/moon/mage.png": 178939,
+  "./assets/characters/cultivation/melee.png": 212568, "./assets/characters/cultivation/ranger.png": 224886, "./assets/characters/cultivation/mage.png": 241044,
+};
+
+const bootAssetTargets = new Map([
+  ["./assets/fallback/city-battlefield-v1.jpg", cityBattlefield], ["./assets/fallback/snow-battlefield-v1.jpg", snowBattlefield],
+  ["./assets/fallback/hospital-battlefield-v1.jpg", hospitalBattlefield], ["./assets/fallback/orbit-battlefield-v1.jpg", orbitBattlefield],
+  ["./assets/fallback/mars-battlefield-v1.jpg", marsBattlefield], ["./assets/fallback/moon-battlefield-v1.jpg", moonBattlefield],
+  ["./assets/fallback/cultivation-battlefield-v1.jpg", cultivationBattlefield], ["./assets/fallback/enemy-worlds-v1.png", enemyAtlas],
+  ["./assets/fallback/city-zombies-v2.png", cityZombieAtlas], ["./assets/fallback/cultivator-enemies-v3.png", cultivatorEnemyAtlas],
+  ["./assets/companions-v1.png", companionAtlas],
+  ...sceneIds.flatMap((sceneId) => heroClassIds.map((classId) => [`./assets/characters/${sceneId}/${classId}.png`, sceneHeroSprites[sceneId][classId]])),
+]);
+
+function getHeroSprite(sceneId, classId) {
+  return sceneHeroSprites[sceneId]?.[classId] || sceneHeroSprites.city.ranger;
+}
+
+function getResolvedAssetUrl(path) {
+  return assetResolvedUrls.get(path) || path;
+}
+
+function setHeroElementSprite(element, sceneId, classId) {
+  if (!element) return;
+  const path = `./assets/characters/${sceneId}/${classId}.png`;
+  element.classList.add("hero-single-sprite");
+  element.dataset.classId = classId;
+  element.style.backgroundImage = `url("${getResolvedAssetUrl(path)}")`;
+}
+
+async function purgeLegacyAssetCaches() {
+  if (location.protocol === "file:") return;
+  try {
+    const registrations = await navigator.serviceWorker?.getRegistrations?.() || [];
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    const keys = "caches" in window ? await window.caches.keys() : [];
+    await Promise.all(keys.filter((key) => key.startsWith("multiverse-defense-")).map((key) => window.caches.delete(key)));
+  } catch (error) {
+    // Cache cleanup is best-effort; network loading still proceeds.
+  }
+}
+
+async function assignBootAsset(entry, url) {
+  const image = bootAssetTargets.get(entry.path);
+  assetResolvedUrls.set(entry.path, url);
+  if (!image) return true;
+  image.dataset.assetState = "loading";
+  image.src = url;
+  const ready = await waitForAsset(image, 20000);
+  if (ready && image.decode) await image.decode().catch(() => {});
+  return ready;
+}
+
+async function preloadAllGameAssets() {
+  const screen = document.querySelector("#loadingScreen");
+  const fill = document.querySelector("#loadingFill");
+  const percent = document.querySelector("#loadingPercent");
+  const bytes = document.querySelector("#loadingBytes");
+  const label = document.querySelector("#loadingLabel");
+  const profile = document.querySelector("#loadingProfile");
+  const retry = document.querySelector("#loadingRetry");
+  const assets = Object.entries(BOOT_ASSET_SIZES).map(([path, size]) => ({ path, size }));
+  const total = assets.reduce((sum, entry) => sum + entry.size, 0);
+  let completed = 0;
+  const partial = new Map();
+  const render = (name = "") => {
+    const loaded = Math.min(total, completed + [...partial.values()].reduce((sum, value) => sum + value, 0));
+    const ratio = total ? loaded / total : 1;
+    fill.style.width = `${ratio * 100}%`;
+    percent.textContent = `${Math.floor(ratio * 100)}%`;
+    bytes.textContent = `${(loaded / 1048576).toFixed(2)} / ${(total / 1048576).toFixed(2)} MB`;
+    if (name) label.textContent = `正在载入 ${name}`;
+  };
+  profile.textContent = LOW_POWER_DEVICE ? "低配流畅档 · 1× 渲染" : "标准画质 · 1.5× 渲染";
+  render("在线素材清单");
+
+  async function loadOne(entry) {
+    const displayName = entry.path.split("/").pop();
+    partial.set(entry.path, 0);
+    render(displayName);
+    try {
+      if (location.protocol === "file:") {
+        const ready = await assignBootAsset(entry, entry.path);
+        if (!ready) throw new Error(`decode failed: ${entry.path}`);
+      } else {
+        const response = await fetch(entry.path, { cache: "no-store" });
+        if (!response.ok) throw new Error(`${response.status}: ${entry.path}`);
+        const reader = response.body?.getReader();
+        const chunks = [];
+        let received = 0;
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.byteLength;
+            partial.set(entry.path, Math.min(entry.size, received));
+            render(displayName);
+          }
+        } else chunks.push(new Uint8Array(await response.arrayBuffer()));
+        const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+        const objectUrl = URL.createObjectURL(blob);
+        const ready = await assignBootAsset(entry, objectUrl);
+        if (!ready) throw new Error(`decode failed: ${entry.path}`);
+      }
+      partial.delete(entry.path);
+      completed += entry.size;
+      render(displayName);
+      return true;
+    } catch (error) {
+      partial.delete(entry.path);
+      return false;
+    }
+  }
+
+  const queue = [...assets];
+  const failed = [];
+  const worker = async () => {
+    while (queue.length) {
+      const entry = queue.shift();
+      if (!await loadOne(entry)) failed.push(entry);
+    }
+  };
+  await Promise.all(Array.from({ length: LOW_POWER_DEVICE ? 2 : 4 }, worker));
+  if (failed.length) {
+    label.textContent = `${failed.length} 个素材未完成，请重试`;
+    retry.classList.remove("hidden");
+    await new Promise((resolve) => retry.addEventListener("click", resolve, { once: true }));
+    retry.classList.add("hidden");
+    return preloadAllGameAssets();
+  }
+  completed = total;
+  render();
+  label.textContent = "七界素材已就绪";
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  screen.classList.add("ready");
+  await new Promise((resolve) => setTimeout(resolve, 430));
+  screen.classList.add("hidden");
+}
 function ensureSceneAssets(sceneId) {
   const assets = [
     battlefieldTextures[sceneId],
-    sceneHeroAtlases[sceneId],
+    ...Object.values(sceneHeroSprites[sceneId] || {}),
     sceneId === "cultivation" ? cultivatorEnemyAtlas : sceneId === "city" ? cityZombieAtlas : enemyAtlas,
     companionAtlas,
   ].filter(Boolean);
@@ -96,7 +255,7 @@ async function prepareSceneAssets(sceneId) {
 }
 const W = 390;
 const H = 844;
-const DPR = Math.min(window.devicePixelRatio || 1, 2);
+const DPR = Math.min(window.devicePixelRatio || 1, LOW_POWER_DEVICE ? 1 : 1.5);
 canvas.width = W * DPR;
 canvas.height = H * DPR;
 ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -197,7 +356,9 @@ const ui = {
   dailyRailBadge: $("#dailyRailBadge"),
   eventRailBadge: $("#eventRailBadge"),
   dungeonRailBadge: $("#dungeonRailBadge"),
+  petDungeonRailBadge: $("#petDungeonRailBadge"),
   skinRailBadge: $("#skinRailBadge"),
+  petDungeonShortcut: $("#petDungeonShortcut"),
   loadoutModal: $("#loadoutModal"),
   classChoices: $("#classChoices"),
   reviveModal: $("#reviveModal"),
@@ -239,7 +400,9 @@ const QA_MODE = new URLSearchParams(location.search).get("qa") === "internal";
 const ADMIN_MODE = location.protocol === "file:" || new URLSearchParams(location.search).get("admin") === "owner";
 const STORAGE_KEY = ADMIN_MODE ? "multiverse-defense-admin-v1" : "multiverse-defense-save-v5";
 const BASE_Y = 752;
-const EFFECT_LIMITS = { particles: 420, floaters: 70, bursts: 96, shockwaves: 72, corpses: 110, xpDrops: 170, medkits: 28, bullets: 220 };
+const EFFECT_LIMITS = LOW_POWER_DEVICE
+  ? { particles: 190, floaters: 38, bursts: 42, shockwaves: 34, corpses: 48, xpDrops: 90, medkits: 18, bullets: 130 }
+  : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
 const ENEMY_GRID_SIZE = 128;
 const enemyGridKey = (x, y) => (x + 32768) * 65536 + y + 32768;
 
@@ -404,9 +567,9 @@ const divineGearDefinitions = {
 };
 
 const petDefinitions = [
-  { id: "emberFox", icon: "狐", spriteIndex: 0, name: "赤焰灵狐", detail: "焰尾追踪 · 均衡输出", color: "#ff9a63", interval: .9, damage: .46, style: "orb" },
-  { id: "warHound", icon: "獒", spriteIndex: 1, name: "玄甲战獒", detail: "玄甲重击 · 高额单伤", color: "#8de5ff", interval: 1.35, damage: .82, style: "blade" },
-  { id: "herbSprite", icon: "药", spriteIndex: 2, name: "青萝药灵", detail: "疗愈花种 · 血包掉率 15%", color: "#7dffb0", interval: 1.55, damage: .3, style: "orb", medkitBonus: .05 },
+  { id: "emberFox", icon: "狐", spriteIndex: 0, name: "赤焰灵狐", detail: "第三章赠送 · 轻量焰尾追踪", color: "#ff9a63", interval: 1.1, damage: .26, style: "orb" },
+  { id: "warHound", icon: "獒", spriteIndex: 1, name: "玄甲战獒", detail: "试炼解锁 · 高额单体重击", color: "#8de5ff", interval: 1.18, damage: .92, style: "blade" },
+  { id: "herbSprite", icon: "药", spriteIndex: 2, name: "青萝药灵", detail: "试炼解锁 · 输出兼顾恢复", color: "#7dffb0", interval: 1.25, damage: .58, style: "orb", medkitBonus: .025 },
 ];
 
 const defaultMeta = {
@@ -427,7 +590,8 @@ const defaultMeta = {
   dungeon: { date: "", entries: 3, clears: 0 },
   activities: { date: "", signIn: false, gearAd: false, avatarAd: false, dungeonGift: false },
   skins: { owned: ["default"], equipped: "default" },
-  pet: { selected: "emberFox" },
+  pet: { version: 2, unlocked: false, owned: [], selected: null, giftClaimed: false },
+  petDungeon: { date: "", freeEntries: 1, adEntries: 1, clears: 0 },
   energy: { date: "", current: 8, max: 8, adRestores: 0 },
 };
 
@@ -451,7 +615,8 @@ function loadMeta() {
       dungeon: { ...defaultMeta.dungeon, ...(saved?.dungeon || {}) },
       activities: { ...defaultMeta.activities, ...(saved?.activities || {}) },
       skins: { ...defaultMeta.skins, ...(saved?.skins || {}), owned: Array.isArray(saved?.skins?.owned) ? saved.skins.owned : ["default"] },
-      pet: { ...defaultMeta.pet, ...(saved?.pet || {}) },
+      pet: { ...defaultMeta.pet, ...(saved?.pet || {}), owned: Array.isArray(saved?.pet?.owned) ? saved.pet.owned : [] },
+      petDungeon: { ...defaultMeta.petDungeon, ...(saved?.petDungeon || {}) },
       energy: { ...defaultMeta.energy, ...(saved?.energy || {}) },
     };
   } catch {
@@ -460,6 +625,7 @@ function loadMeta() {
 }
 
 let meta = loadMeta();
+if (meta.pet.version !== 2) meta.pet = structuredClone(defaultMeta.pet);
 if (ADMIN_MODE) {
   meta.coins = 999999;
   meta.energy = { date: todayKey(), current: 99, max: 99, adRestores: 0 };
@@ -467,6 +633,8 @@ if (ADMIN_MODE) {
   for (const scene of scenes) meta.progress[scene.id] = scene.endless ? 0 : LEVELS_PER_SCENE;
   for (const id of Object.keys(meta.upgrades)) meta.upgrades[id] = 10;
   for (const state of Object.values(meta.divineGear)) { state.unlocked = true; state.level = Math.max(12, state.level || 1); }
+  meta.pet = { version: 2, unlocked: true, owned: petDefinitions.map((pet) => pet.id), selected: "warHound", giftClaimed: true };
+  meta.petDungeon = { date: todayKey(), freeEntries: 99, adEntries: 99, clears: Math.max(2, meta.petDungeon?.clears || 0) };
 }
 if (meta.gearSystemVersion !== 2) {
   const legacyClass = classDefinitions.some((entry) => entry.id === meta.selectedClass) ? meta.selectedClass : "ranger";
@@ -475,6 +643,7 @@ if (meta.gearSystemVersion !== 2) {
   meta.gearSystemVersion = 2;
 }
 refreshDailyState();
+refreshPetProgression();
 saveMeta();
 let game = null;
 let mode = QA_MODE || ADMIN_MODE ? "home" : "login";
@@ -490,6 +659,7 @@ let adTimer = null;
 let pendingAdReward = null;
 let selectedRunClass = meta.selectedClass || "ranger";
 let pendingRunType = "main";
+let pendingPetEntryKind = null;
 let assetLaunchPending = false;
 let lastRunType = "main";
 const movementKeys = new Set();
@@ -522,11 +692,32 @@ function refreshDailyState() {
   refreshDailyAds();
   if (meta.daily.date !== today) meta.daily = { date: today, runs: 0, kills: 0, xp: 0, ads: 0, claimed: {} };
   if (meta.dungeon.date !== today) meta.dungeon = { date: today, entries: 3, clears: 0 };
+  if (meta.petDungeon.date !== today) meta.petDungeon = { date: today, freeEntries: ADMIN_MODE ? 99 : 1, adEntries: ADMIN_MODE ? 99 : 1, clears: meta.petDungeon.clears || 0 };
   if (meta.activities.date !== today) meta.activities = { date: today, signIn: false, gearAd: false, avatarAd: false, dungeonGift: false };
   if (meta.energy.date !== today) meta.energy = { date: today, current: meta.energy.max || 8, max: meta.energy.max || 8, adRestores: 0 };
   meta.energy.current = Math.max(0, Math.min(meta.energy.max, meta.energy.current));
   if (!meta.skins.owned.includes("default")) meta.skins.owned.unshift("default");
   if (!meta.skins.owned.includes(meta.skins.equipped)) meta.skins.equipped = "default";
+}
+
+function refreshPetProgression() {
+  const chapterThreeCleared = (meta.progress.hospital || 0) >= LEVELS_PER_SCENE;
+  if (ADMIN_MODE) {
+    meta.pet.unlocked = true;
+    meta.pet.owned = petDefinitions.map((pet) => pet.id);
+    meta.pet.selected ||= "warHound";
+    return;
+  }
+  if (chapterThreeCleared) {
+    meta.pet.unlocked = true;
+    if (!meta.pet.owned.includes("emberFox")) meta.pet.owned.push("emberFox");
+    meta.pet.selected ||= "emberFox";
+    meta.pet.giftClaimed = true;
+  }
+  if (!meta.pet.unlocked) {
+    meta.pet.owned = [];
+    meta.pet.selected = null;
+  }
 }
 
 function getEquippedSkin() {
@@ -539,7 +730,8 @@ function getClassWeaponVisual(combatClass) {
 }
 
 function getSelectedPet() {
-  return petDefinitions.find((pet) => pet.id === meta.pet.selected) || petDefinitions[0];
+  if (!meta.pet.unlocked || !meta.pet.selected || !meta.pet.owned.includes(meta.pet.selected)) return null;
+  return petDefinitions.find((pet) => pet.id === meta.pet.selected) || null;
 }
 
 function getGearById(id) {
@@ -650,6 +842,7 @@ function getSceneRequirement(index) {
 }
 
 function getRunEnergyCost(runType = "main") {
+  if (runType === "petDungeon") return 0;
   return scenes[selectedSceneIndex].endless && runType !== "resource" ? 2 : 1;
 }
 
@@ -794,6 +987,30 @@ const upgradeDefinitions = [
     apply: (player) => { player.explosionRadius += 18; player.slowChance += .12; },
   },
   {
+    id: "flow", icon: "◒", name: "灵动架势", description: "战士转入轻灵架势：攻速 +12%，剑势飞行距离 +45%", max: 4, classes: ["melee"],
+    apply: (player) => { player.fireInterval *= .88; player.projectileLife *= 1.45; },
+  },
+  {
+    id: "crescent", icon: "☽", name: "半月剑气", description: "挥击凝成半月剑气，扩大命中面并额外贯穿目标", max: 4, classes: ["melee"],
+    apply: (player) => { player.pierce += 1; player.damage *= 1.12; },
+  },
+  {
+    id: "shadowstep", icon: "◈", name: "影袭步", description: "射手衍生刺客路线：移速 +14%，暴击率 +9%", max: 4, classes: ["ranger"],
+    apply: (player) => { player.moveSpeed *= 1.14; player.critChance += .09; },
+  },
+  {
+    id: "assassinate", icon: "†", name: "近距处决", description: "缩短有效射程，换取 34% 伤害与高额暴击倍率", max: 4, classes: ["ranger"],
+    apply: (player) => { player.projectileLife *= .82; player.damage *= 1.34; },
+  },
+  {
+    id: "spellEcho", icon: "∞", name: "咒式回响", description: "施法产生一次回响，额外投射并缩短咏唱", max: 4, classes: ["mage"],
+    apply: (player) => { player.bulletCount += 1; player.fireInterval *= .91; },
+  },
+  {
+    id: "ritualField", icon: "◎", name: "仪式法域", description: "命中铺开持续反应场，提高爆破与控制强度", max: 4, classes: ["mage"],
+    apply: (player) => { player.explosionChance += .14; player.explosionRadius += 14; player.slowChance += .07; },
+  },
+  {
     id: "spiritPet", icon: "狐", name: "御兽真经", description: "召来灵宠巡游护主，自动追击附近修士", max: 6, cultivationOnly: true,
     apply: (player) => { player.spiritPetLevel += 1; player.spiritPets = Math.min(3, 1 + Math.floor((player.spiritPetLevel - 1) / 2)); },
   },
@@ -930,11 +1147,36 @@ const sceneSkillGroups = {
   },
 };
 
+const derivedThemeNames = {
+  city: ["霓虹", "暗巷", "磁暴"], snow: ["踏雪", "雪隐", "极光"], hospital: ["无菌", "静默", "细胞"],
+  orbit: ["星跃", "相位", "星环"], mars: ["赤砂", "荒猎", "日冕"], moon: ["月影", "寂静", "潮汐"], cultivation: ["御风", "无影", "两仪"],
+};
+
+function getDerivedSkillGroup(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id) {
+  const theme = derivedThemeNames[sceneId] || derivedThemeNames.city;
+  if (classId === "melee") return { core: "flow", link: "crescent", aux: "crit", synergy: `${theme[0]}剑气·游龙`, color: "#8ff7ff", style: "bladeWave" };
+  if (classId === "ranger") return { core: "shadowstep", link: "assassinate", aux: "haste", synergy: `${theme[1]}刺客·瞬狱`, color: "#ff7fd1", style: "assassin" };
+  return { core: "spellEcho", link: "ritualField", aux: "multi", synergy: `${theme[2]}法域·回响`, color: "#c99cff", style: "ritualSwarm" };
+}
+
+function getDerivedUpgradePresentation(definition, sceneId, classId) {
+  const theme = derivedThemeNames[sceneId] || derivedThemeNames.city;
+  const names = classId === "melee"
+    ? { flow: `${theme[0]}灵动`, crescent: `${theme[0]}半月剑气` }
+    : classId === "ranger"
+      ? { shadowstep: `${theme[1]}潜行`, assassinate: `${theme[1]}近距绝杀` }
+      : { spellEcho: `${theme[2]}咒式回响`, ritualField: `${theme[2]}仪式法域` };
+  if (!names[definition.id]) return null;
+  return { name: names[definition.id], description: definition.description };
+}
+
 function getSceneSkillGroup(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id) {
   return sceneSkillGroups[sceneId]?.[classId] || null;
 }
 
 function getUpgradePresentation(definition) {
+  const derivedCopy = getDerivedUpgradePresentation(definition, game.scene.id, game.player.combatClass.id);
+  if (derivedCopy) return derivedCopy;
   const group = getSceneSkillGroup();
   const pathCopy = group?.labels?.[definition.id];
   if (pathCopy) return { name: pathCopy[0], description: pathCopy[1] };
@@ -965,7 +1207,7 @@ function isLevelUnlocked(sceneIndex, level) {
 
 function makeGame(runType = "main") {
   const baseScene = scenes[selectedSceneIndex];
-  const scene = runType === "resource" && baseScene.endless ? { ...baseScene, endless: false } : baseScene;
+  const scene = (runType === "resource" || runType === "petDungeon") && baseScene.endless ? { ...baseScene, endless: false } : baseScene;
   const missionLevel = selectedLevel;
   const levelModifier = getLevelModifier(missionLevel);
   const combatClass = getSceneClassProfile(scene, selectedRunClass);
@@ -976,7 +1218,7 @@ function makeGame(runType = "main") {
   const divine = divineState.unlocked ? getDivineGearCombatStats(divineState.level, selectedSceneIndex) : { damage: 0, health: 0, crit: 0, pulse: 0 };
   const endlessNoviceGrace = scene.endless ? Math.max(0, Math.min(1, (360 - getCombatPower(combatClass.id)) / 260)) : 0;
   const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health) * (1 + endlessNoviceGrace * .45));
-  const missionTarget = runType === "resource" ? 45 : scene.endless ? Infinity : 26 + selectedSceneIndex * 6 + missionLevel * 3;
+  const missionTarget = runType === "petDungeon" ? 62 : runType === "resource" ? 45 : scene.endless ? Infinity : 26 + selectedSceneIndex * 6 + missionLevel * 3;
   const isDivineTutorialStage = selectedSceneIndex === 0 && missionLevel <= 2;
   const shouldDeliverDivineGear = runType === "main" && isDivineTutorialStage && !divineState.unlocked;
   return {
@@ -985,9 +1227,9 @@ function makeGame(runType = "main") {
     missionLevel,
     levelModifier,
     runType,
-    difficulty: runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
+    difficulty: runType === "petDungeon" ? 1.48 + meta.petDungeon.clears * .07 : runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
     endlessNoviceGrace,
-    waveSeconds: QA_MODE ? 2 : runType === "resource" ? 8.5 : 11.5 + Math.min(2.5, missionLevel * 0.22),
+    waveSeconds: QA_MODE ? 2 : runType === "petDungeon" ? 9.5 : runType === "resource" ? 8.5 : 11.5 + Math.min(2.5, missionLevel * 0.22),
     elapsed: 0,
     wave: 1,
     maxHealth,
@@ -1015,6 +1257,8 @@ function makeGame(runType = "main") {
     divineAwakening: 0,
     divineOverdrive: 0,
     pendingDivineRevive: false,
+    petReviveUsed: false,
+    petRescueOverdrive: false,
     ultimate: null,
     world: { infinite: true, domainIndex: 0 },
     camera: { zoom: scene.id === "hospital" ? 1.19 : scene.endless ? 1.13 : 1.16 },
@@ -1023,7 +1267,7 @@ function makeGame(runType = "main") {
     directorTimer: 0,
     spawnTimer: 0.45,
     shotTimer: 0.1,
-    performance: { quality: 1, slowFrames: 0 },
+    performance: { quality: LOW_POWER_DEVICE ? .72 : 1, slowFrames: 0 },
     pulseTimer: 0,
     pulseMax: Math.max(14, 22 * (1 - meta.upgrades.pulse * .035)),
     kills: 0,
@@ -1041,7 +1285,7 @@ function makeGame(runType = "main") {
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
-    banner: { text: runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · 初入仙域获得护道加持，随重天逐步解除` : `${combatClass.name} · 指向移动，靠近拾取经验`, time: 2.3 },
+    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · 初入仙域获得护道加持，随重天逐步解除` : `${combatClass.name} · 指向移动，靠近拾取经验`, time: 2.3 },
     player: {
       weapon,
       combatClass,
@@ -1067,6 +1311,8 @@ function makeGame(runType = "main") {
       upgrades: {},
       synergies: {},
       activeSynergy: null,
+      branchFocus: null,
+      derivedStyle: null,
       aimAngle: -Math.PI / 2,
       muzzle: 0,
       attackAnim: 0,
@@ -1094,7 +1340,7 @@ function makeGame(runType = "main") {
 }
 
 function openLoadout(runType = "main") {
-  if (!isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
+  if (runType !== "petDungeon" && !isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
     showToast(getSceneLockedMessage());
     return;
   }
@@ -1104,8 +1350,8 @@ function openLoadout(runType = "main") {
   if (runType === "resource" && meta.dungeon.entries <= 0) { showToast("今日丰饶之境次数已用完"); return; }
   pendingRunType = runType;
   const scene = scenes[selectedSceneIndex];
-  document.querySelector("#loadoutTitle").textContent = runType === "resource" ? "选择丰饶远征职业" : `选择${scene.name}职业`;
-  document.querySelector(".loadout-hint").textContent = runType === "resource" ? `当前主题：${scene.name}；每个角色读取自己的装备方案。消耗 ${energyCost} 体力。` : `本场只提供符合「${scene.name}」世界观的职业；三名角色分别养成。消耗 ${energyCost} 体力。`;
+  document.querySelector("#loadoutTitle").textContent = runType === "petDungeon" ? "选择灵宠试炼职业" : runType === "resource" ? "选择丰饶远征职业" : `选择${scene.name}职业`;
+  document.querySelector(".loadout-hint").textContent = runType === "petDungeon" ? `零体力消耗 · 敌人按第三章通关战力上浮；首次倒下可观看广告获得强力救援。` : runType === "resource" ? `当前主题：${scene.name}；每个角色读取自己的装备方案。消耗 ${energyCost} 体力。` : `本场只提供符合「${scene.name}」世界观的职业；三名角色分别养成。消耗 ${energyCost} 体力。`;
   ui.classChoices.innerHTML = "";
   for (const combatClass of classDefinitions) {
     const themed = getSceneClassProfile(scene, combatClass.id);
@@ -1115,6 +1361,7 @@ function openLoadout(runType = "main") {
     const orbitGlyph = combatClass.id === "melee" ? "◆" : combatClass.id === "ranger" ? "▷" : "⬢";
     const gearCount = Object.values(getClassGear(combatClass.id)).filter(Boolean).length;
     button.innerHTML = `<i class="class-portrait class-${combatClass.id}${scene.id === "orbit" ? " orbit-craft" : ""}" aria-hidden="true">${scene.id === "orbit" ? orbitGlyph : ""}</i><span><b>${themed.name}</b><p>${themed.description}<br>战力 ${getCombatPower(combatClass.id)} · 装备 ${gearCount}/6</p></span><span>›</span>`;
+    setHeroElementSprite(button.querySelector(".class-portrait"), scene.id, combatClass.id);
     button.addEventListener("click", () => startGame(combatClass.id, runType), { once: true });
     ui.classChoices.append(button);
   }
@@ -1123,7 +1370,7 @@ function openLoadout(runType = "main") {
 
 async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (assetLaunchPending) return;
-  if (!isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
+  if (runType !== "petDungeon" && !isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
     showToast(getSceneLockedMessage());
     return;
   }
@@ -1150,6 +1397,10 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (runType === "resource") {
     if (meta.dungeon.entries <= 0) { showToast("今日丰饶之境次数已用完"); return; }
     meta.dungeon.entries -= 1;
+  }
+  if (runType === "petDungeon" && !ADMIN_MODE) {
+    if (pendingPetEntryKind === "free") meta.petDungeon.freeEntries = Math.max(0, meta.petDungeon.freeEntries - 1);
+    pendingPetEntryKind = null;
   }
   if (!QA_MODE && !ADMIN_MODE) meta.energy.current -= energyCost;
   meta.selectedClass = classId;
@@ -1184,8 +1435,9 @@ function finishGame(won) {
   mode = "result";
   paused = true;
   const resourceRun = game.runType === "resource";
+  const petRun = game.runType === "petDungeon";
   if (resourceRun && won) game.loot.push(createGuaranteedGear(game.sceneIndex >= 3 ? "epic" : "rare"));
-  const clearBonus = resourceRun ? (won ? 120 + getAccountProgress().level * 6 : 18) : won ? 38 + game.missionLevel * 4 + game.sceneIndex * 10 : 10;
+  const clearBonus = petRun ? (won ? 90 : 15) : resourceRun ? (won ? 120 + getAccountProgress().level * 6 : 18) : won ? 38 + game.missionLevel * 4 + game.sceneIndex * 10 : 10;
   let salvageCoins = 0;
   if (!QA_MODE) {
     for (const item of game.loot) {
@@ -1208,18 +1460,27 @@ function finishGame(won) {
     meta.daily.kills += game.kills;
     meta.daily.xp += game.pickedXp || 0;
     if (resourceRun && won) meta.dungeon.clears += 1;
-    if (won && !game.scene.endless && !resourceRun) meta.wins += 1;
-    if (won && !game.scene.endless && !resourceRun) {
+    if (petRun && won) {
+      meta.petDungeon.clears += 1;
+      const rewardPet = !meta.pet.owned.includes("warHound") ? "warHound" : !meta.pet.owned.includes("herbSprite") ? "herbSprite" : null;
+      if (rewardPet) {
+        meta.pet.owned.push(rewardPet);
+        game.petReward = petDefinitions.find((pet) => pet.id === rewardPet);
+      }
+    }
+    if (won && !game.scene.endless && !resourceRun && !petRun) meta.wins += 1;
+    if (won && !game.scene.endless && !resourceRun && !petRun) {
       const previous = meta.progress[game.scene.id];
       meta.progress[game.scene.id] = Math.max(previous, game.missionLevel);
       if (game.missionLevel === LEVELS_PER_SCENE && previous < LEVELS_PER_SCENE && game.sceneIndex < scenes.length - 1 && !scenes[game.sceneIndex + 1].endless) {
         if (isSceneUnlocked(game.sceneIndex + 1)) unlockedScene = scenes[game.sceneIndex + 1];
       }
     }
+    refreshPetProgression();
     saveMeta();
   }
 
-  if (resourceRun) {
+  if (resourceRun || petRun) {
     selectedSceneIndex = game.sceneIndex;
     selectedLevel = game.missionLevel;
   } else if (won && game.missionLevel < LEVELS_PER_SCENE) {
@@ -1240,10 +1501,10 @@ function finishGame(won) {
   ui.upgrade.classList.add("hidden");
   ui.pauseOverlay.classList.add("hidden");
   ui.result.classList.remove("hidden");
-  ui.resultBadge.textContent = resourceRun ? (won ? "丰饶远征 · 完成" : "丰饶远征 · 失利") : game.scene.endless ? `修行至 ${getRealmName(game.player.level)}` : won ? `${game.scene.shortName} ${String(game.missionLevel).padStart(2, "0")} · 完成` : "防线失守";
+  ui.resultBadge.textContent = petRun ? (won ? "灵宠试炼 · 完成" : "灵宠试炼 · 失利") : resourceRun ? (won ? "丰饶远征 · 完成" : "丰饶远征 · 失利") : game.scene.endless ? `修行至 ${getRealmName(game.player.level)}` : won ? `${game.scene.shortName} ${String(game.missionLevel).padStart(2, "0")} · 完成` : "防线失守";
   ui.resultBadge.classList.toggle("fail", !won);
-  ui.resultTitle.textContent = resourceRun ? (won ? "补给满载而归" : "整备后再出发") : game.scene.endless ? "本次修行结束" : won ? "区域已收复" : "防线被突破";
-  ui.resultSubtitle.textContent = resourceRun ? `今日剩余 ${meta.dungeon.entries} 次 · 通关装备已送入军械库` : game.scene.endless ? `共跨越 ${game.wave} 重天，击败 ${game.kills} 名对手` : unlockedScene
+  ui.resultTitle.textContent = petRun ? (won ? (game.petReward ? `${game.petReward.name}加入队伍` : "灵宠获得成长") : "试炼暂未通过") : resourceRun ? (won ? "补给满载而归" : "整备后再出发") : game.scene.endless ? "本次修行结束" : won ? "区域已收复" : "防线被突破";
+  ui.resultSubtitle.textContent = petRun ? (won ? game.petReward ? `${game.petReward.detail} · 已可在军械库选择` : "已获得灵宠培养资源与补给币" : "首次免费机会强度较高；观看救援广告复活后可获得本局增幅") : resourceRun ? `今日剩余 ${meta.dungeon.entries} 次 · 通关装备已送入军械库` : game.scene.endless ? `共跨越 ${game.wave} 重天，击败 ${game.kills} 名对手` : unlockedScene
     ? `新章节「${unlockedScene.name}」已经解锁`
     : won && game.missionLevel === LEVELS_PER_SCENE && game.sceneIndex < scenes.length - 1
       ? `${scenes[game.sceneIndex + 1].name}入口已发现 · ${getSceneLockedMessage(game.sceneIndex + 1)}`
@@ -1271,10 +1532,9 @@ function finishGame(won) {
     }, 650);
   }
   const nextSceneIsLocked = won && !resourceRun && game.missionLevel === LEVELS_PER_SCENE && game.sceneIndex < scenes.length - 1 && !isSceneUnlocked(game.sceneIndex + 1);
-  ui.resultActionText.textContent = resourceRun ? (meta.dungeon.entries > 0 ? "再次远征" : "今日次数已用完") : nextSceneIsLocked ? "前往解锁主题装扮" : game.scene.endless ? "再次修行" : won && (game.missionLevel < LEVELS_PER_SCENE || game.sceneIndex < scenes.length - 1) ? "进入下一关" : "再次挑战";
-  ui.retry.disabled = resourceRun && meta.dungeon.entries <= 0;
+  ui.resultActionText.textContent = petRun ? (meta.petDungeon.freeEntries > 0 || meta.petDungeon.adEntries > 0 || ADMIN_MODE ? "再次试炼" : "今日次数已用完") : resourceRun ? (meta.dungeon.entries > 0 ? "再次远征" : "今日次数已用完") : nextSceneIsLocked ? "前往解锁主题装扮" : game.scene.endless ? "再次修行" : won && (game.missionLevel < LEVELS_PER_SCENE || game.sceneIndex < scenes.length - 1) ? "进入下一关" : "再次挑战";
+  ui.retry.disabled = petRun ? (!ADMIN_MODE && meta.petDungeon.freeEntries <= 0 && meta.petDungeon.adEntries <= 0) : resourceRun && meta.dungeon.entries <= 0;
   tone(won ? 523 : 120, won ? 0.35 : 0.5, won ? "triangle" : "sawtooth", 0.06, won ? 1.5 : 0.55);
-  if (navigator.vibrate) navigator.vibrate(won ? [50, 50, 90] : [130, 70, 180]);
 }
 
 function returnHome() {
@@ -1326,7 +1586,7 @@ function update(dt) {
   }
 
   game.spawnTimer -= dt;
-  if (game.spawnTimer <= 0 && game.enemies.length < 92) {
+  if (game.spawnTimer <= 0 && game.enemies.length < (LOW_POWER_DEVICE ? 54 : 84)) {
     const reinforcementChance = 0.13 + (game.levelModifier.spawn - 1) * 1.6;
     const amount = game.wave >= 4 && Math.random() < reinforcementChance * game.director ? 2 : 1;
     for (let i = 0; i < amount; i += 1) spawnEnemy(pickEnemyType());
@@ -1739,7 +1999,6 @@ function spawnBoss() {
     : { text: "警告 · 首领来袭", sub: `${bossName}正在接近`, time: 3.2 };
   game.shake = 9;
   tone(85, 0.5, "sawtooth", 0.06, 0.65);
-  if (navigator.vibrate) navigator.vibrate([80, 40, 120]);
 }
 
 function announceWave(wave) {
@@ -1838,6 +2097,9 @@ function shoot() {
   const count = game.player.bulletCount;
   const weapon = game.player.weapon;
   const combatClass = game.player.combatClass;
+  const bladeWave = player.derivedStyle === "bladeWave" && combatClass.id === "melee";
+  const assassin = player.derivedStyle === "assassin" && combatClass.id === "ranger";
+  const ritualSwarm = player.derivedStyle === "ritualSwarm" && combatClass.id === "mage";
   const attackId = nextId++;
   const identityPierce = { icicle: 1, laser: 2, rail: 3, flyingSword: 2, spell: 1 }[combatClass.fx] || 0;
   for (let i = 0; i < count; i += 1) {
@@ -1847,18 +2109,18 @@ function shoot() {
       y: originY + Math.sin(angle) * 27,
       vx: Math.cos(angle) * combatClass.speed,
       vy: Math.sin(angle) * combatClass.speed,
-      damage: game.player.damage,
+      damage: game.player.damage * (assassin && targetDistance < 155 * 155 ? 1.28 : 1),
       pierceLeft: game.player.pierce + identityPierce,
-      explosive: Math.random() < game.player.explosionChance,
-      color: combatClass.color,
-      accent: weapon.color,
-      visual: weapon.visual,
-      attackStyle: game.scene.endless ? (combatClass.id === "mage" ? "orb" : "blade") : combatClass.style,
-      contactAttack: combatClass.id === "melee",
+      explosive: ritualSwarm || Math.random() < game.player.explosionChance,
+      color: bladeWave ? "#b9fff1" : assassin ? "#ff85d2" : combatClass.color,
+      accent: bladeWave ? "#ffffff" : weapon.color,
+      visual: bladeWave ? "pulse" : weapon.visual,
+      attackStyle: bladeWave ? "blade" : game.scene.endless ? (combatClass.id === "mage" ? "orb" : "blade") : combatClass.style,
+      contactAttack: combatClass.id === "melee" && !bladeWave,
       attackId,
-      fx: combatClass.fx,
-      size: combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3,
-      hitRadius: combatClass.fx === "flyingSword" ? 24 : 5,
+      fx: bladeWave ? "flyingSword" : assassin ? "shadowBlade" : ritualSwarm ? "ritualOrb" : combatClass.fx,
+      size: bladeWave ? 21 : combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3,
+      hitRadius: bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5,
       trail: [],
       age: 0,
       hits: new Set(),
@@ -2288,6 +2550,21 @@ function damagePlayer(rawDamage, sourceX, sourceY, heavy = false) {
 }
 
 function handlePlayerDeath() {
+  if (game.runType === "petDungeon") {
+    if (!game.petReviveUsed) {
+      game.pendingPetRevive = true;
+      paused = true;
+      ui.reviveKicker.textContent = "COMPANION RESCUE";
+      ui.reviveTitle.textContent = "试炼守护仍可响应";
+      ui.reviveDescription.textContent = "观看一次演示广告，满血复活并获得伤害、攻速与大招循环强化，足以完成本次高强度试炼。";
+      ui.reviveAdButton.querySelector("span").textContent = "▶ 呼叫灵宠救援并复活";
+      ui.endEndlessButton.textContent = "结束试炼";
+      ui.reviveModal.classList.remove("hidden");
+      return;
+    }
+    finishGame(false);
+    return;
+  }
   if (!game.scene.endless) {
     const divineState = getDivineGearState(game.player.combatClass.id);
     const isLockedCityFinale = game.sceneIndex === 0 && game.missionLevel === LEVELS_PER_SCENE && !divineState.unlocked;
@@ -2613,16 +2890,24 @@ function showUpgradeChoices() {
     && (!entry.classes || entry.classes.includes(game.player.combatClass.id))
     && (game.scene.endless || (game.player.upgrades[entry.id] || 0) < entry.max));
   const group = getSceneSkillGroup();
-  const pathIds = group ? [group.core, group.link, group.aux] : [];
+  const derivedGroup = getDerivedSkillGroup();
+  const pathIds = [...(group ? [group.core, group.link, group.aux] : []), ...(derivedGroup ? [derivedGroup.core, derivedGroup.link, derivedGroup.aux] : [])];
   const classPath = available.filter((entry) => entry.classes);
   const cultivationPath = available.filter((entry) => entry.cultivationOnly).sort(() => Math.random() - 0.5);
   const commonPath = available.filter((entry) => !entry.classes && !entry.cultivationOnly).sort(() => Math.random() - 0.5);
-  const pathPriority = !group ? []
+  const primaryPriority = !group ? []
     : game.player.upgrades[group.core] ? (game.player.upgrades[group.link] ? [group.core, group.link, group.aux] : [group.link, group.core, group.aux])
     : [group.core, group.aux, group.link];
-  const pathChoice = pathPriority.map((id) => available.find((entry) => entry.id === id)).find(Boolean);
+  const derivedPriority = !derivedGroup ? []
+    : game.player.upgrades[derivedGroup.core] ? (game.player.upgrades[derivedGroup.link] ? [derivedGroup.core, derivedGroup.link, derivedGroup.aux] : [derivedGroup.link, derivedGroup.core, derivedGroup.aux])
+    : [derivedGroup.core, derivedGroup.aux, derivedGroup.link];
+  const selectedPriority = game.player.branchFocus === "derived" ? derivedPriority : primaryPriority;
+  const alternatePriority = game.player.branchFocus === "derived" ? primaryPriority : derivedPriority;
+  const pathChoice = selectedPriority.map((id) => available.find((entry) => entry.id === id)).find(Boolean);
+  const alternateChoice = alternatePriority.map((id) => available.find((entry) => entry.id === id)).find(Boolean);
   const shuffled = [];
   if (pathChoice) shuffled.push(pathChoice);
+  if (!game.player.branchFocus && alternateChoice && !shuffled.includes(alternateChoice)) shuffled.push(alternateChoice);
   if (game.scene.endless) {
     const cultivationChoice = cultivationPath.find((entry) => !shuffled.includes(entry));
     if (cultivationChoice) shuffled.push(cultivationChoice);
@@ -2661,6 +2946,10 @@ function chooseUpgrade(definition) {
   const player = game.player;
   const nextRank = (player.upgrades[definition.id] || 0) + 1;
   player.upgrades[definition.id] = nextRank;
+  const primary = getSceneSkillGroup();
+  const derived = getDerivedSkillGroup();
+  if (!player.branchFocus && definition.id === primary?.core) player.branchFocus = "primary";
+  if (!player.branchFocus && definition.id === derived?.core) player.branchFocus = "derived";
   if (game.scene.endless && nextRank > definition.max && !definition.cultivationOnly) applyEndlessOverflow(definition.id, player);
   else definition.apply(player);
   activateHiddenSkillSynergy(player);
@@ -2675,6 +2964,25 @@ function chooseUpgrade(definition) {
 
 function activateHiddenSkillSynergy(player) {
   const group = getSceneSkillGroup();
+  const derived = getDerivedSkillGroup();
+  if (derived && player.upgrades[derived.core] && player.upgrades[derived.link] && !player.synergies[derived.synergy]) {
+    player.synergies[derived.synergy] = true;
+    player.activeSynergy = derived;
+    player.derivedStyle = derived.style;
+    if (derived.style === "bladeWave") {
+      player.damage *= 1.18; player.fireInterval *= 1.16; player.projectileLife *= 1.25; player.pierce += 2;
+    } else if (derived.style === "assassin") {
+      player.damage *= 1.22; player.critChance += .16; player.moveSpeed *= 1.08; player.projectileLife *= .72;
+    } else {
+      player.damage *= 1.12; player.explosionChance = Math.min(.9, player.explosionChance + .22); player.explosionRadius += 24;
+    }
+    game.banner = { text: derived.synergy, sub: "隐藏衍生职业已觉醒", time: 2.5 };
+    game.flash = Math.max(game.flash, .38);
+    game.shockwaves.push({ x: player.x, y: player.y, radius: 8, maxRadius: 128, life: .9, color: derived.color });
+    makeParticles(player.x, player.y - 10, derived.color, 28, 205);
+    tone(360, .14, "sine", .05, 1.8);
+    return;
+  }
   if (!group || !player.upgrades[group.core] || !player.upgrades[group.link] || player.synergies[group.synergy]) return;
   player.synergies[group.synergy] = true;
   player.activeSynergy = group;
@@ -2984,15 +3292,30 @@ function renderDivineGearCard() {
 
 function renderPetRoster() {
   if (!ui.petRoster) return;
-  ui.petRoster.innerHTML = petDefinitions.map((pet) => `<button class="pet-card${meta.pet.selected === pet.id ? " active" : ""}" data-pet="${pet.id}" style="--pet-color:${pet.color};--pet-x:${pet.spriteIndex * 50}%"><i class="pet-portrait pet-${pet.id}" aria-hidden="true"></i><b>${pet.name}</b><small>${pet.detail}</small></button>`).join("");
+  refreshPetProgression();
+  const owned = new Set(meta.pet.owned);
+  ui.petRoster.innerHTML = petDefinitions.map((pet) => {
+    const unlocked = owned.has(pet.id);
+    const lockCopy = !meta.pet.unlocked ? "通关第三章后开放" : pet.id === "emberFox" ? "第三章通关赠送" : "前往灵宠试炼解锁";
+    return `<button class="pet-card${meta.pet.selected === pet.id ? " active" : ""}${unlocked ? "" : " locked"}" data-pet="${pet.id}" style="--pet-color:${pet.color};--pet-x:${pet.spriteIndex * 50}%"><i class="pet-portrait pet-${pet.id}" aria-hidden="true"></i><b>${unlocked ? pet.name : "？？？"}</b><small>${unlocked ? pet.detail : lockCopy}</small></button>`;
+  }).join("");
+  ui.petRoster.querySelectorAll(".pet-portrait").forEach((portrait) => { portrait.style.backgroundImage = `url("${getResolvedAssetUrl("./assets/companions-v1.png")}")`; });
   for (const button of ui.petRoster.querySelectorAll(".pet-card")) {
     button.addEventListener("click", () => {
+      if (!meta.pet.owned.includes(button.dataset.pet)) {
+        showToast(meta.pet.unlocked ? "通关灵宠试炼后可解锁" : "通关第三章后解锁宠物系统并获赠灵狐");
+        return;
+      }
       meta.pet.selected = button.dataset.pet;
       saveMeta();
       renderPetRoster();
       showToast(`${getSelectedPet().name}已设为随行宠物`);
       tone(610, .1, "triangle", .025, 1.4);
     });
+  }
+  if (ui.petDungeonShortcut) {
+    ui.petDungeonShortcut.querySelector("span").textContent = meta.pet.unlocked ? "每日首次免费 ›" : "第三章通关后开放 ›";
+    ui.petDungeonShortcut.onclick = () => openRetentionPanel("petDungeon");
   }
 }
 
@@ -3051,19 +3374,17 @@ function renderArmoryAvatarPreview() {
   const pctx = preview.getContext("2d");
   const scene = scenes[selectedSceneIndex];
   const combatClass = getSceneClassProfile(scene, selectedRunClass);
-  const classIndex = combatClass.id === "melee" ? 0 : combatClass.id === "ranger" ? 1 : 2;
   const gradient = pctx.createLinearGradient(0, 0, 0, preview.height);
   gradient.addColorStop(0, scene.colors.mid); gradient.addColorStop(1, scene.colors.top);
   pctx.clearRect(0, 0, preview.width, preview.height); pctx.fillStyle = gradient; pctx.fillRect(0, 0, preview.width, preview.height);
   pctx.strokeStyle = colorAlpha(scene.colors.grid, .12); pctx.lineWidth = 1;
   for (let y = 34; y < preview.height; y += 32) { pctx.beginPath(); pctx.moveTo(0, y); pctx.lineTo(preview.width, y); pctx.stroke(); }
-  const atlas = sceneHeroAtlases[scene.id] || heroAtlas;
-  if (atlas.complete && atlas.naturalWidth) {
-    const sourceWidth = atlas.naturalWidth / 3;
+  const sprite = getHeroSprite(scene.id, selectedRunClass);
+  if (sprite.complete && sprite.naturalWidth) {
     const width = scene.endless ? 120 : scene.id === "hospital" ? 106 : 92;
     const height = scene.endless ? 160 : scene.id === "hospital" ? 142 : 128;
     pctx.save(); pctx.shadowColor = combatClass.color; pctx.shadowBlur = 18;
-    pctx.drawImage(atlas, sourceWidth * classIndex, 0, sourceWidth, atlas.naturalHeight, 160 - width / 2, 8, width, height); pctx.restore();
+    pctx.drawImage(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, 160 - width / 2, 8, width, height); pctx.restore();
   }
   const classGear = getClassGear(selectedRunClass);
   const gear = Object.fromEntries(gearSlots.map((slot) => [slot, getGearById(classGear[slot])]));
@@ -3210,6 +3531,10 @@ function renderCommandSidebar() {
   ui.eventRailBadge.textContent = eventReady ? "可领取" : "进行中";
   ui.eventRailBadge.classList.toggle("ready", eventReady);
   ui.dungeonRailBadge.textContent = `${meta.dungeon.entries}/3`;
+  if (ui.petDungeonRailBadge) {
+    ui.petDungeonRailBadge.textContent = !meta.pet.unlocked ? "第三章" : meta.petDungeon.freeEntries > 0 ? "免费 1 次" : meta.petDungeon.adEntries > 0 ? "广告进入" : "明日刷新";
+    ui.petDungeonRailBadge.classList.toggle("ready", meta.pet.unlocked && meta.petDungeon.freeEntries > 0);
+  }
   ui.skinRailBadge.textContent = meta.skins.owned.includes("jade_avatar") ? "颜色已领" : "免费颜色";
   ui.skinRailBadge.classList.toggle("ready", !meta.skins.owned.includes("jade_avatar"));
 }
@@ -3222,12 +3547,13 @@ function openRetentionPanel(panel = "daily") {
   refreshDailyState();
   const titles = {
     daily: ["DAILY OPERATIONS", "每日任务"], events: ["LIMITED EVENTS", "活动中心"],
-    dungeon: ["RESOURCE EXPEDITION", "丰饶之境"], skins: ["COSMETIC STORE", "幻装商城"],
+    dungeon: ["RESOURCE EXPEDITION", "丰饶之境"], petDungeon: ["COMPANION TRIAL", "灵宠试炼"], skins: ["COSMETIC STORE", "幻装商城"],
   };
   [ui.retentionKicker.textContent, ui.retentionTitle.textContent] = titles[panel] || titles.daily;
   if (panel === "daily") renderDailyPanel();
   else if (panel === "events") renderEventsPanel();
   else if (panel === "dungeon") renderDungeonPanel();
+  else if (panel === "petDungeon") renderPetDungeonPanel();
   else renderSkinsPanel();
   ui.retentionModal.dataset.panel = panel;
   ui.retentionModal.classList.remove("hidden");
@@ -3257,6 +3583,37 @@ function renderEventsPanel() {
 function renderDungeonPanel() {
   ui.retentionContent.innerHTML = `<div class="dungeon-gate"><i>⌁</i><b>丰饶之境</b><p>独立资源副本 · 每日 3 次 · 约 55 秒。敌人按当前章节动态匹配，通关必得稀有以上装备与大量补给币。</p><button data-retention-action="dungeon:enter" ${meta.dungeon.entries <= 0 ? "disabled" : ""}>进入远征 · 今日 ${meta.dungeon.entries} / 3</button></div><div class="retention-summary"><b>掉落规则</b><p>前 3 章保底稀有装备，第 4 章起保底史诗装备；装备属性仍随章节梯度成长。</p></div>`;
   bindRetentionActions();
+}
+
+function renderPetDungeonPanel() {
+  refreshPetProgression();
+  const locked = !meta.pet.unlocked;
+  const nextReward = !meta.pet.owned.includes("warHound") ? petDefinitions[1] : !meta.pet.owned.includes("herbSprite") ? petDefinitions[2] : null;
+  const entryLabel = locked ? "第三章通关后开放" : ADMIN_MODE ? "管理员无限进入" : meta.petDungeon.freeEntries > 0 ? "免费进入 · 今日 1/1" : meta.petDungeon.adEntries > 0 ? "▶ 看广告进入" : "今日次数已用完";
+  ui.retentionContent.innerHTML = `<div class="dungeon-gate"><i>狐</i><b>灵宠试炼</b><p>普通账号通关第三章后开放并获赠赤焰灵狐。首次免费试炼按第三章毕业战力上浮，倒下后可观看广告获得一次强力复活。</p><button data-retention-action="petDungeon:enter" ${locked || (!ADMIN_MODE && meta.petDungeon.freeEntries <= 0 && meta.petDungeon.adEntries <= 0) ? "disabled" : ""}>${entryLabel}</button></div><div class="retention-summary"><b>${nextReward ? `下一只灵宠：${nextReward.name}` : "三只灵宠已全部解锁"}</b><p>${nextReward ? `${nextReward.detail}。通关后直接加入军械库；后续重复通关奖励培养资源。` : `已完成核心收集，重复试炼可获得 90 补给币。`} 管理员模式不扣次数、不受解锁限制。</p></div>`;
+  bindRetentionActions();
+}
+
+function beginPetDungeon() {
+  refreshDailyState();
+  refreshPetProgression();
+  if (!meta.pet.unlocked) { showToast("通关第三章后开放灵宠系统与灵宠试炼"); return; }
+  const enter = (kind) => {
+    pendingPetEntryKind = kind;
+    ui.retentionModal.classList.add("hidden");
+    openLoadout("petDungeon");
+  };
+  if (ADMIN_MODE) { enter("admin"); return; }
+  if (meta.petDungeon.freeEntries > 0) { enter("free"); return; }
+  if (meta.petDungeon.adEntries > 0) {
+    openAdDemo(() => {
+      meta.petDungeon.adEntries = Math.max(0, meta.petDungeon.adEntries - 1);
+      saveMeta();
+      enter("ad");
+    }, false, { title: "进入灵宠试炼", icon: "狐", headline: "今日追加试炼许可", detail: "完整观看后开放一次灵宠试炼", claimLabel: "领取试炼许可" });
+    return;
+  }
+  showToast("今日灵宠试炼次数已用完");
 }
 
 function renderSkinsPanel() {
@@ -3290,6 +3647,8 @@ function handleRetentionAction(action) {
     meta.activities.dungeonGift = true; const item = addRewardGear("epic"); saveMeta(); renderEventsPanel(); renderHome(); showToast(`首胜礼：${item.name}`);
   } else if (type === "dungeon" && id === "enter") {
     ui.retentionModal.classList.add("hidden"); openLoadout("resource");
+  } else if (type === "petDungeon" && id === "enter") {
+    beginPetDungeon();
   } else if (type === "skin") {
     const skin = skinDefinitions.find((entry) => entry.id === id); if (!skin) return;
     if (meta.skins.owned.includes(id)) meta.skins.equipped = id;
@@ -3357,8 +3716,8 @@ function renderCommandCenter() {
   const cleared = meta.progress[scene.id] || 0;
   const combatClass = getSceneClassProfile(scene, selectedRunClass);
   const nextLevel = scene.endless ? "无尽修行" : getLevelModifier(selectedLevel).name;
-  ui.lobbyHero.dataset.classId = selectedRunClass;
-  ui.sceneHero.dataset.classId = selectedRunClass;
+  setHeroElementSprite(ui.lobbyHero, scene.id, selectedRunClass);
+  setHeroElementSprite(ui.sceneHero, scene.id, selectedRunClass);
   ui.lobbyChapter.textContent = `${scene.chapter} · ${scene.name}`;
   ui.lobbyMission.textContent = isSceneUnlocked(selectedSceneIndex) ? `待命：${nextLevel}` : "战区入口受限";
   ui.lobbyProgress.textContent = scene.endless ? "六大修行地域循环 · 首领无限轮换" : `区域攻略 ${cleared} / ${LEVELS_PER_SCENE}`;
@@ -3376,12 +3735,13 @@ function renderSceneMap() {
   const unlocked = isSceneUnlocked(selectedSceneIndex);
   const modifier = getLevelModifier(selectedLevel);
   document.querySelector("#app").dataset.scene = scene.id;
+  document.querySelector("#lobbyStage")?.style.setProperty("--lobby-bg", `url("${getResolvedAssetUrl(`./assets/fallback/${scene.id}-battlefield-v1.jpg`)}")`);
   if (ui.sceneIcon) ui.sceneIcon.textContent = scene.icon;
   ui.chapter.textContent = scene.chapter;
   ui.sceneName.textContent = scene.name;
   ui.sceneDescription.textContent = scene.description;
   ui.sceneHero.textContent = "";
-  ui.sceneHero.dataset.classId = selectedRunClass;
+  setHeroElementSprite(ui.sceneHero, scene.id, selectedRunClass);
   ui.sceneStatus.textContent = !unlocked ? "装扮门槛" : scene.endless ? "无尽开放" : cleared >= LEVELS_PER_SCENE ? "章节完成" : cleared ? `推进 ${cleared}/${LEVELS_PER_SCENE}` : "新战区";
   ui.sceneCard.classList.toggle("locked", !unlocked);
   ui.sceneProgressFill.style.width = `${cleared / LEVELS_PER_SCENE * 100}%`;
@@ -4687,7 +5047,16 @@ function drawBullet(bullet) {
   ctx.shadowBlur = bullet.visual === "starbreaker" ? 22 : 13;
   ctx.fillStyle = bullet.explosive ? "#ffb54f" : bullet.color;
 
-  if (bullet.fx === "tracer") {
+  if (bullet.fx === "shadowBlade") {
+    ctx.fillStyle = "#fff2fb"; ctx.shadowColor = "#ff64c8"; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.moveTo(21, 0); ctx.lineTo(-5, -5); ctx.lineTo(-16, 0); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = colorAlpha("#ff64c8", .72); ctx.lineWidth = 2;
+    for (const offset of [-6, 0, 6]) { ctx.beginPath(); ctx.moveTo(-32, offset); ctx.lineTo(8, offset * .22); ctx.stroke(); }
+  } else if (bullet.fx === "ritualOrb") {
+    ctx.rotate((bullet.age || 0) * 5); ctx.fillStyle = "#f8ebff"; ctx.beginPath(); ctx.arc(0, 0, 6.5 * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = bullet.color; ctx.lineWidth = 2;
+    for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, 10 + ring * 5, 4 + ring * 2.5, ring * Math.PI / 3, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (bullet.fx === "tracer") {
     const casing = ctx.createLinearGradient(-18, 0, 12, 0); casing.addColorStop(0, colorAlpha("#ff9b46", 0)); casing.addColorStop(.55, "#ffc66b"); casing.addColorStop(1, "#ffffff");
     ctx.fillStyle = casing; rr(-22, -2.1, 36, 4.2, 2); ctx.fill(); ctx.fillStyle = "#ff743d"; ctx.fillRect(6, -3, 8, 6);
   } else if (bullet.fx === "icicle") {
@@ -5267,15 +5636,15 @@ function drawCultivationAvatar(player, attack, facing) {
     ctx.beginPath(); ctx.ellipse(0, 29, 34 + ring * 11, 10 + ring * 4, ambienceTime * ((ring % 2 ? -1 : 1) * (.2 + ring * .05)), 0, Math.PI * 2); ctx.stroke();
   }
   ctx.setLineDash([]);
-  if (cultivatorHeroAtlas.complete && cultivatorHeroAtlas.naturalWidth) {
-    const sourceWidth = cultivatorHeroAtlas.naturalWidth / 3;
+  const sprite = getHeroSprite("cultivation", player.combatClass.id);
+  if (sprite.complete && sprite.naturalWidth) {
     const baseSway = Math.sin(player.walkPhase) * .035;
     const weaponMotion = player.combatClass.id === "mage" ? -cast * .035 : (-.13 + attackSmooth * .29) * (attackActive ? 1 : 0);
     const thrust = player.combatClass.id === "mage" ? cast * 2 : cast * 5;
     ctx.save();
     ctx.translate(thrust, -cast * 3);
     ctx.rotate(baseSway + weaponMotion);
-    ctx.drawImage(cultivatorHeroAtlas, sourceWidth * classIndex, 0, sourceWidth, cultivatorHeroAtlas.naturalHeight, -46, -89 - cast * 3, 92, 124);
+    ctx.drawImage(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -46, -89 - cast * 3, 92, 124);
     ctx.restore();
   } else {
     ctx.fillStyle = player.combatClass.color; ctx.fillRect(-18, -60, 36, 96);
@@ -5571,12 +5940,11 @@ function drawBase() {
   } else if (game.scene.id === "cultivation") {
     drawCultivationAvatar(player, attack, facing);
   } else {
-    const activeAtlas = sceneHeroAtlases[game.scene.id] || heroAtlas;
-    if (activeAtlas.complete && activeAtlas.naturalWidth) {
-      const sourceWidth = activeAtlas.naturalWidth / 3;
+    const activeSprite = getHeroSprite(game.scene.id, player.combatClass.id);
+    if (activeSprite.complete && activeSprite.naturalWidth) {
       const width = game.scene.id === "hospital" ? 86 : 78;
       const height = game.scene.id === "hospital" ? 115 : 104;
-      drawAnimatedHeroSprite(activeAtlas, sourceWidth * classIndex, sourceWidth, width, height, moving, stride, attack, player.combatClass.id, game.scene.id);
+      drawAnimatedHeroSprite(activeSprite, 0, activeSprite.naturalWidth, width, height, moving, stride, attack, player.combatClass.id, game.scene.id);
     } else {
       ctx.fillStyle = player.combatClass.color; ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill();
     }
@@ -5609,9 +5977,8 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
   const pulse = Math.sin(ambienceTime * 17);
   const bank = moving ? stride * .035 : Math.sin(ambienceTime * 2) * .012;
   ctx.save();
-  if (orbitShipAtlas.complete && orbitShipAtlas.naturalWidth) {
-    const classIndex = shipClass === "melee" ? 0 : shipClass === "ranger" ? 1 : 2;
-    const sourceWidth = orbitShipAtlas.naturalWidth / 3;
+  const sprite = getHeroSprite("orbit", shipClass);
+  if (sprite.complete && sprite.naturalWidth) {
     const width = shipClass === "mage" ? 82 : shipClass === "melee" ? 75 : 68;
     const height = shipClass === "mage" ? 106 : 112;
     ctx.rotate(player.aimAngle + Math.PI / 2 + bank);
@@ -5621,7 +5988,7 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
     engineGlow.addColorStop(0, colorAlpha(player.combatClass.color, .9)); engineGlow.addColorStop(1, colorAlpha(player.combatClass.color, 0));
     ctx.fillStyle = engineGlow; ctx.shadowColor = player.combatClass.color; ctx.shadowBlur = 13;
     for (const engineX of shipClass === "mage" ? [-20, 20] : [-15, 15]) { ctx.beginPath(); ctx.moveTo(engineX - 5, height * .36); ctx.lineTo(engineX, height * .54 + flame); ctx.lineTo(engineX + 5, height * .36); ctx.closePath(); ctx.fill(); }
-    ctx.drawImage(orbitShipAtlas, sourceWidth * classIndex, 0, sourceWidth, orbitShipAtlas.naturalHeight, -width / 2, -height / 2, width, height);
+    ctx.drawImage(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -width / 2, -height / 2, width, height);
     ctx.restore();
     return;
   }
@@ -6044,6 +6411,12 @@ ui.quickArmory.addEventListener("click", () => switchHomePanel("armory"));
 ui.nextObjective.addEventListener("click", () => openRetentionPanel("daily"));
 ui.start.addEventListener("click", () => openLoadout("main"));
 ui.retry.addEventListener("click", () => {
+  if (lastRunType === "petDungeon") {
+    ui.result.classList.add("hidden");
+    returnHome();
+    beginPetDungeon();
+    return;
+  }
   if (selectedSceneIndex > 0 && !isSceneUnlocked(selectedSceneIndex)) {
     returnHome();
     openRetentionPanel("skins");
@@ -6098,6 +6471,24 @@ ui.claimAdReward.addEventListener("click", () => {
 });
 ui.reviveAdButton.addEventListener("click", () => {
   ui.reviveModal.classList.add("hidden");
+  if (game?.pendingPetRevive) {
+    openAdDemo(() => {
+      if (!game) return;
+      game.pendingPetRevive = false;
+      game.petReviveUsed = true;
+      game.petRescueOverdrive = true;
+      game.health = game.maxHealth;
+      game.player.damage *= 1.82;
+      game.player.fireInterval *= .72;
+      game.player.moveSpeed *= 1.12;
+      game.pulseTimer = 0;
+      game.enemies = game.enemies.filter((enemy) => enemy.type === "boss" || Math.hypot(enemy.x - game.player.x, enemy.y - game.player.y) > 250);
+      game.shockwaves.push({ x: game.player.x, y: game.player.y, radius: 12, maxRadius: 360, life: 1.1, color: "#ffca72" });
+      game.banner = { text: "灵契救援 · 超限共鸣", sub: "满血复活 · 伤害 +82% · 攻速 +39% · 大招已刷新", time: 3.6 };
+      paused = false;
+    }, false, { title: "灵宠试炼救援", icon: "狐", headline: "灵契超限共鸣", detail: "本局复活并获得决定性战力增幅", claimLabel: "复活并共鸣" });
+    return;
+  }
   if (game?.pendingDivineRevive) {
     const classId = game.player.combatClass.id;
     const definition = divineGearDefinitions[classId];
@@ -6128,6 +6519,7 @@ ui.reviveAdButton.addEventListener("click", () => {
 ui.endEndlessButton.addEventListener("click", () => {
   ui.reviveModal.classList.add("hidden");
   if (game) game.pendingDivineRevive = false;
+  if (game) game.pendingPetRevive = false;
   finishGame(false);
 });
 ui.pause.addEventListener("click", () => togglePause());
@@ -6235,6 +6627,9 @@ if (QA_MODE) {
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
       combatClass: game.player.combatClass.id,
+      branch: game.player.branchFocus,
+      derivedStyle: game.player.derivedStyle,
+      synergy: game.player.activeSynergy?.synergy || null,
       boss: game.boss ? game.boss.hp : null,
     } : { mode },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
@@ -6243,22 +6638,18 @@ if (QA_MODE) {
   };
 }
 
-if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  window.addEventListener("load", async () => {
-    try {
-      const registration = await navigator.serviceWorker.register("./service-worker.js?v=45", { updateViaCache: "none" });
-      await registration.update();
-      registration.waiting?.postMessage("SKIP_WAITING");
-    } catch (error) {
-      // The game stays fully playable without offline caching.
-    }
-  });
+async function bootGame() {
+  await purgeLegacyAssetCaches();
+  await preloadAllGameAssets();
+  await purgeLegacyAssetCaches();
+  renderHome();
+  if (QA_MODE || ADMIN_MODE) {
+    ui.login.classList.add("hidden");
+    ui.home.classList.remove("hidden");
+    switchHomePanel("command");
+  }
+  lastFrame = performance.now();
+  requestAnimationFrame(frame);
 }
 
-renderHome();
-if (QA_MODE || ADMIN_MODE) {
-  ui.login.classList.add("hidden");
-  ui.home.classList.remove("hidden");
-  switchHomePanel("command");
-}
-requestAnimationFrame(frame);
+bootGame();
