@@ -397,7 +397,7 @@ const ui = {
 const TOTAL_WAVES = 6;
 const LEVELS_PER_SCENE = 12;
 const QA_MODE = new URLSearchParams(location.search).get("qa") === "internal";
-const ADMIN_MODE = location.protocol === "file:" || new URLSearchParams(location.search).get("admin") === "owner";
+const ADMIN_MODE = new URLSearchParams(location.search).get("admin") === "owner";
 const STORAGE_KEY = ADMIN_MODE ? "multiverse-defense-admin-v1" : "multiverse-defense-save-v5";
 const BASE_Y = 752;
 const EFFECT_LIMITS = LOW_POWER_DEVICE
