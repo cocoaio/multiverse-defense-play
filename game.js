@@ -61,9 +61,9 @@ function waitForAsset(image, timeout = 8500) {
 
 const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp", false, "./assets/fallback/posters/original/hero-archetypes-v1.png");
 const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp", false, "./assets/fallback/enemy-worlds-v1.png");
-const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", true);
+const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", true, "./assets/fallback/city-zombies-v2.png");
 const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp", false, "./assets/fallback/posters/original/cultivator-heroes-v1.png");
-const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v3.png");
+const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v3.png", false, "./assets/fallback/cultivator-enemies-v3.png");
 const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp", false, "./assets/fallback/posters/original/hospital-heroes-v1.png");
 const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp", false, "./assets/fallback/hospital-battlefield-v1.jpg");
 const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true, "./assets/fallback/city-battlefield-v1.jpg");
@@ -6246,7 +6246,7 @@ if (QA_MODE) {
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("./service-worker.js?v=43", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("./service-worker.js?v=44", { updateViaCache: "none" });
       await registration.update();
       registration.waiting?.postMessage("SKIP_WAITING");
     } catch (error) {
