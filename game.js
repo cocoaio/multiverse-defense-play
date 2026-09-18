@@ -1,42 +1,98 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-function createAssetImage(src, eager = false) {
+const COMPAT_ASSET_MODE = /MicroMessenger|MQQBrowser|UCBrowser|baiduboxapp|Android/i.test(navigator.userAgent);
+function createAssetImage(src, eager = false, fallbackSrc = "") {
   const image = new Image();
   image.decoding = "async";
-  image.dataset.src = src;
-  if (eager) image.src = src;
+  image.fetchPriority = eager ? "high" : "auto";
+  image.dataset.primarySrc = src;
+  image.dataset.fallbackSrc = fallbackSrc;
+  image.dataset.src = COMPAT_ASSET_MODE && fallbackSrc ? fallbackSrc : src;
+  image.dataset.alternateSrc = image.dataset.src === src ? fallbackSrc : src;
+  image.dataset.assetState = "idle";
+  image.addEventListener("load", () => {
+    image.dataset.assetState = "ready";
+    image.dispatchEvent(new Event("assetready"));
+  });
+  image.addEventListener("error", () => {
+    if (image.dataset.alternateSrc && image.dataset.alternateTried !== "true") {
+      image.dataset.alternateTried = "true";
+      image.src = image.dataset.alternateSrc;
+      return;
+    }
+    image.dataset.assetState = "failed";
+    image.dispatchEvent(new Event("assetfailed"));
+  });
+  if (eager) {
+    image.dataset.assetState = "loading";
+    image.src = image.dataset.src;
+  }
   return image;
 }
 
 function ensureImageLoaded(image) {
-  if (image && !image.src) image.src = image.dataset.src;
+  if (image && !image.src) {
+    image.dataset.assetState = "loading";
+    image.src = image.dataset.src;
+  }
   return image;
 }
 
-const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp");
-const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp");
+function waitForAsset(image, timeout = 8500) {
+  ensureImageLoaded(image);
+  if (image?.complete && image.naturalWidth) return image.decode?.().catch(() => {}).then(() => true) || Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      image.removeEventListener("assetready", onReady);
+      image.removeEventListener("assetfailed", onFailed);
+      resolve(ready);
+    };
+    const onReady = () => image.decode?.().catch(() => {}).finally(() => finish(Boolean(image.naturalWidth))) || finish(Boolean(image.naturalWidth));
+    const onFailed = () => finish(false);
+    image.addEventListener("assetready", onReady);
+    image.addEventListener("assetfailed", onFailed);
+    const timer = setTimeout(() => finish(Boolean(image.complete && image.naturalWidth)), timeout);
+  });
+}
+
+const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp", false, "./assets/fallback/posters/original/hero-archetypes-v1.png");
+const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp", false, "./assets/fallback/enemy-worlds-v1.png");
 const cityZombieAtlas = createAssetImage("./assets/city-zombies-v2.png", true);
-const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp");
+const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp", false, "./assets/fallback/posters/original/cultivator-heroes-v1.png");
 const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v3.png");
-const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp");
-const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp");
-const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true);
-const snowBattlefield = createAssetImage("./assets/snow-battlefield-v1.webp");
-const orbitBattlefield = createAssetImage("./assets/orbit-battlefield-v1.webp");
-const marsBattlefield = createAssetImage("./assets/mars-battlefield-v1.webp");
-const moonBattlefield = createAssetImage("./assets/moon-battlefield-v1.webp");
-const cultivationBattlefield = createAssetImage("./assets/cultivation-battlefield-v1.webp");
-const cityHeroAtlas = createAssetImage("./assets/posters/original/city-heroes-v1.webp", true);
-const snowHeroAtlas = createAssetImage("./assets/posters/original/snow-heroes-v1.webp");
-const orbitShipAtlas = createAssetImage("./assets/posters/original/orbit-ships-v1.webp");
-const marsHeroAtlas = createAssetImage("./assets/posters/original/mars-heroes-v1.webp");
-const moonHeroAtlas = createAssetImage("./assets/posters/original/moon-heroes-v1.webp");
+const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp", false, "./assets/fallback/posters/original/hospital-heroes-v1.png");
+const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp", false, "./assets/fallback/hospital-battlefield-v1.jpg");
+const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true, "./assets/fallback/city-battlefield-v1.jpg");
+const snowBattlefield = createAssetImage("./assets/snow-battlefield-v1.webp", false, "./assets/fallback/snow-battlefield-v1.jpg");
+const orbitBattlefield = createAssetImage("./assets/orbit-battlefield-v1.webp", false, "./assets/fallback/orbit-battlefield-v1.jpg");
+const marsBattlefield = createAssetImage("./assets/mars-battlefield-v1.webp", false, "./assets/fallback/mars-battlefield-v1.jpg");
+const moonBattlefield = createAssetImage("./assets/moon-battlefield-v1.webp", false, "./assets/fallback/moon-battlefield-v1.jpg");
+const cultivationBattlefield = createAssetImage("./assets/cultivation-battlefield-v1.webp", false, "./assets/fallback/cultivation-battlefield-v1.jpg");
+const cityHeroAtlas = createAssetImage("./assets/posters/original/city-heroes-v1.webp", true, "./assets/fallback/posters/original/city-heroes-v1.png");
+const snowHeroAtlas = createAssetImage("./assets/posters/original/snow-heroes-v1.webp", false, "./assets/fallback/posters/original/snow-heroes-v1.png");
+const orbitShipAtlas = createAssetImage("./assets/posters/original/orbit-ships-v1.webp", false, "./assets/fallback/posters/original/orbit-ships-v1.png");
+const marsHeroAtlas = createAssetImage("./assets/posters/original/mars-heroes-v1.webp", false, "./assets/fallback/posters/original/mars-heroes-v1.png");
+const moonHeroAtlas = createAssetImage("./assets/posters/original/moon-heroes-v1.webp", false, "./assets/fallback/posters/original/moon-heroes-v1.png");
+const companionAtlas = createAssetImage("./assets/companions-v1.png", true);
 const battlefieldTextures = { city: cityBattlefield, snow: snowBattlefield, hospital: hospitalBattlefield, orbit: orbitBattlefield, mars: marsBattlefield, moon: moonBattlefield, cultivation: cultivationBattlefield };
 const sceneHeroAtlases = { city: cityHeroAtlas, snow: snowHeroAtlas, hospital: hospitalHeroAtlas, orbit: orbitShipAtlas, mars: marsHeroAtlas, moon: moonHeroAtlas, cultivation: cultivatorHeroAtlas };
 function ensureSceneAssets(sceneId) {
-  ensureImageLoaded(battlefieldTextures[sceneId]);
-  ensureImageLoaded(sceneHeroAtlases[sceneId]);
-  ensureImageLoaded(sceneId === "cultivation" ? cultivatorEnemyAtlas : sceneId === "city" ? cityZombieAtlas : enemyAtlas);
+  const assets = [
+    battlefieldTextures[sceneId],
+    sceneHeroAtlases[sceneId],
+    sceneId === "cultivation" ? cultivatorEnemyAtlas : sceneId === "city" ? cityZombieAtlas : enemyAtlas,
+    companionAtlas,
+  ].filter(Boolean);
+  assets.forEach(ensureImageLoaded);
+  return assets;
+}
+async function prepareSceneAssets(sceneId) {
+  const results = await Promise.all(ensureSceneAssets(sceneId).map((asset) => waitForAsset(asset)));
+  return results.every(Boolean);
 }
 const W = 390;
 const H = 844;
@@ -348,9 +404,9 @@ const divineGearDefinitions = {
 };
 
 const petDefinitions = [
-  { id: "emberFox", icon: "狐", name: "赤焰灵狐", detail: "快速追踪弹 · 均衡输出", color: "#ff9a63", interval: .9, damage: .46, style: "orb" },
-  { id: "warHound", icon: "獒", name: "玄甲战獒", detail: "重击剑气 · 高额单伤", color: "#8de5ff", interval: 1.35, damage: .82, style: "blade" },
-  { id: "herbSprite", icon: "药", name: "青萝药灵", detail: "血包掉率提升至 28%", color: "#7dffb0", interval: 1.55, damage: .3, style: "orb", medkitBonus: .08 },
+  { id: "emberFox", icon: "狐", spriteIndex: 0, name: "赤焰灵狐", detail: "焰尾追踪 · 均衡输出", color: "#ff9a63", interval: .9, damage: .46, style: "orb" },
+  { id: "warHound", icon: "獒", spriteIndex: 1, name: "玄甲战獒", detail: "玄甲重击 · 高额单伤", color: "#8de5ff", interval: 1.35, damage: .82, style: "blade" },
+  { id: "herbSprite", icon: "药", spriteIndex: 2, name: "青萝药灵", detail: "疗愈花种 · 血包掉率 15%", color: "#7dffb0", interval: 1.55, damage: .3, style: "orb", medkitBonus: .05 },
 ];
 
 const defaultMeta = {
@@ -434,6 +490,7 @@ let adTimer = null;
 let pendingAdReward = null;
 let selectedRunClass = meta.selectedClass || "ranger";
 let pendingRunType = "main";
+let assetLaunchPending = false;
 let lastRunType = "main";
 const movementKeys = new Set();
 const pointerMove = { x: W / 2, y: H / 2, originX: W / 2, originY: H / 2, active: false, touchId: null, touchMode: false };
@@ -833,6 +890,60 @@ const sceneSpecialistUpgradeNames = {
   },
 };
 
+// Each world/class owns a three-piece growth path. The UI never exposes the
+// recipe; taking the core and linked skill together awakens the named reaction.
+const sceneSkillGroups = {
+  city: {
+    melee: { core: "bladeReach", link: "grenade", aux: "power", synergy: "超载破城", color: "#ff9a57", labels: { bladeReach: ["破障蓄能", "扩大动力刃横扫范围并强化近战压制"], grenade: ["震荡刃压", "斩击在接触点留下二次震荡"], power: ["反应堆增压", "稳定提高动力武装的基础输出"] } },
+    ranger: { core: "hunter", link: "haste", aux: "pierce", synergy: "穿城弹链", color: "#70eaff", labels: { hunter: ["猎手专注", "校准感染体弱点并提高贯穿能力"], haste: ["极速装填", "压缩供弹周期，维持连续火力"], pierce: ["钨芯穿甲", "让磁轨弹继续穿过后排目标"] } },
+    mage: { core: "arcane", link: "multi", aux: "crit", synergy: "电磁风暴", color: "#c8a2ff", labels: { arcane: ["高压线圈", "扩大电弧反应区与感应范围"], multi: ["三相电网", "额外并联一道高压电弧"], crit: ["短路测算", "锁定电阻最低的致命节点"] } },
+  },
+  snow: {
+    melee: { core: "bladeReach", link: "frost", aux: "power", synergy: "永冻碎岳", color: "#dff9ff", labels: { bladeReach: ["冰川抡击", "扩大重锤挥舞半径与破冰伤害"], frost: ["霜甲侵蚀", "重击累积深寒并迟滞雪怪"], power: ["极寒蓄力", "强化每一次冰锤落点的冲击"] } },
+    ranger: { core: "hunter", link: "multi", aux: "pierce", synergy: "极光贯星", color: "#8cecff", labels: { hunter: ["极地校准", "在风雪中锁定目标薄弱部位"], multi: ["冰矛分光", "一次投射分化额外冰晶长矛"], pierce: ["冰脊穿透", "长矛贯穿更多冻结目标"] } },
+    mage: { core: "arcane", link: "frost", aux: "grenade", synergy: "绝对零域", color: "#a8c8ff", labels: { arcane: ["寒潮核心", "扩大冷凝场并稳定液氮反应"], frost: ["深度冷冻", "持续积累冻结强度"], grenade: ["冰晶爆裂", "冻裂时产生更大的碎晶范围"] } },
+  },
+  hospital: {
+    melee: { core: "bladeReach", link: "grenade", aux: "repair", synergy: "无菌封锁", color: "#8dffe0", labels: { bladeReach: ["隔离推进", "扩大盾棍清扫范围与正面压制"], grenade: ["净化余波", "接触病原体时扩散消杀冲击"], repair: ["应急血清", "提高生命上限并补充应急状态"] } },
+    ranger: { core: "hunter", link: "haste", aux: "pierce", synergy: "链式免疫", color: "#73eaff", labels: { hunter: ["抗体标记", "标记高危病原并提高精准贯穿"], haste: ["快速注射", "缩短抗体弹装填与注射周期"], pierce: ["细胞穿透", "抗体弹连续穿透多个病原体"] } },
+    mage: { core: "arcane", link: "grenade", aux: "frost", synergy: "全域灭活", color: "#72ffd0", labels: { arcane: ["裂解反应", "扩大试剂反应区与抑制强度"], grenade: ["催化扩散", "触发更强的链式灭活爆发"], frost: ["低温封存", "延缓病原活动并延长反应窗口"] } },
+  },
+  orbit: {
+    melee: { core: "bladeReach", link: "pierce", aux: "power", synergy: "群星潮汐", color: "#82dcff", labels: { bladeReach: ["星核环轨", "扩大星系球公转轨道与撞击范围"], pierce: ["引力贯穿", "星体沿轨道连续碾过虫群"], power: ["恒星增质", "提高环绕星体的质量与伤害"] } },
+    ranger: { core: "hunter", link: "haste", aux: "pierce", synergy: "光速贯阵", color: "#77eeff", labels: { hunter: ["磁轨校准", "锁定虫群阵列的结构缺口"], haste: ["超导装填", "降低舰炮冷却并连续齐射"], pierce: ["相位弹芯", "炮弹继续贯穿后续编队"] } },
+    mage: { core: "arcane", link: "multi", aux: "grenade", synergy: "指数蜂群", color: "#bda0ff", labels: { arcane: ["蜂群协议", "扩大无人机协同与锁敌半径"], multi: ["并行机库", "额外释放一组攻击无人机"], grenade: ["脉冲雷阵", "无人机命中后展开脉冲爆破"] } },
+  },
+  mars: {
+    melee: { core: "bladeReach", link: "grenade", aux: "power", synergy: "行星裂解", color: "#ff9d69", labels: { bladeReach: ["熔斧蓄热", "扩大热能战斧挥砍范围"], grenade: ["断层余震", "斧刃落点引发赤砂震爆"], power: ["聚变刃芯", "提高战斧温度与基础伤害"] } },
+    ranger: { core: "hunter", link: "pierce", aux: "haste", synergy: "赤砂贯星", color: "#ffd276", labels: { hunter: ["荒原猎标", "标记装甲缝隙并提高暴击"], pierce: ["钨核熔穿", "合金弹贯穿更多火星敌军"], haste: ["磁轨复位", "缩短炮轨复位与供弹时间"] } },
+    mage: { core: "arcane", link: "grenade", aux: "multi", synergy: "日冕失控", color: "#ff8fc7", labels: { arcane: ["等离子共振", "扩大高热磁约束反应区"], grenade: ["日冕爆裂", "等离子命中后引发二次爆燃"], multi: ["多核喷射", "额外投射一枚不稳定等离子核"] } },
+  },
+  moon: {
+    melee: { core: "bladeReach", link: "grenade", aux: "power", synergy: "月震奇点", color: "#e9e8ff", labels: { bladeReach: ["重力蓄势", "扩大重锤引力场与挥击范围"], grenade: ["坍缩半径", "锤击后形成短暂局部奇点"], power: ["月核增重", "提高重锤质量与基础伤害"] } },
+    ranger: { core: "hunter", link: "haste", aux: "crit", synergy: "寂静光轨", color: "#aeeaff", labels: { hunter: ["静海瞄准", "在真空中校正弹道弱点"], haste: ["真空装填", "缩短脉冲枪的散热周期"], crit: ["月影测距", "提高远距离致命命中率"] } },
+    mage: { core: "arcane", link: "frost", aux: "grenade", synergy: "永夜坍缩", color: "#c4b7ff", labels: { arcane: ["引力共振", "扩大引力井并延长牵引"], frost: ["冻结时域", "让坍缩区内的时间进一步迟滞"], grenade: ["奇点爆发", "引力核终结时造成范围坍缩"] } },
+  },
+  cultivation: {
+    melee: { core: "bladeReach", link: "grenade", aux: "power", synergy: "一剑镇九州", color: "#ffd27a", labels: { bladeReach: ["镇岳剑势", "重剑横扫更广，剑势愈发沉雄"], grenade: ["山河震气", "剑锋落处震开第二重罡气"], power: ["真元淬锋", "以真元持续温养镇岳重剑"] } },
+    ranger: { core: "hunter", link: "haste", aux: "pierce", synergy: "飞虹连天", color: "#a9ffe0", labels: { hunter: ["剑心通明", "洞察气机，以剑气追索破绽"], haste: ["御剑行气", "周天流转加快，连续挥出剑气"], pierce: ["破罡剑意", "飞虹剑气洞穿更多护体罡气"] } },
+    mage: { core: "arcane", link: "frost", aux: "tribulation", synergy: "星霜天劫", color: "#d5b4ff", labels: { arcane: ["紫府星诀", "扩大星咒法域与灵力共鸣"], frost: ["玄冰封脉", "冻结经脉，为雷法留下天劫印记"], tribulation: ["九天雷劫", "定期引雷轰击高修为敌人"] } },
+  },
+};
+
+function getSceneSkillGroup(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id) {
+  return sceneSkillGroups[sceneId]?.[classId] || null;
+}
+
+function getUpgradePresentation(definition) {
+  const group = getSceneSkillGroup();
+  const pathCopy = group?.labels?.[definition.id];
+  if (pathCopy) return { name: pathCopy[0], description: pathCopy[1] };
+  const specialistCopy = game.player.combatClass.id === "mage" ? sceneSpecialistUpgradeNames[game.scene.id]?.[definition.id] : null;
+  const scenePresentation = specialistCopy ? { name: specialistCopy[0], description: specialistCopy[1] } : null;
+  const classPresentation = scenePresentation || classUpgradeNames[game.player.combatClass.id]?.[definition.id];
+  return game.scene.endless ? cultivationUpgradeNames[definition.id] || classPresentation || definition : classPresentation || definition;
+}
+
 function saveMeta() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(meta));
 }
@@ -954,6 +1065,8 @@ function makeGame(runType = "main") {
       xp: 0,
       xpNeeded: 34,
       upgrades: {},
+      synergies: {},
+      activeSynergy: null,
       aimAngle: -Math.PI / 2,
       muzzle: 0,
       attackAnim: 0,
@@ -1008,7 +1121,8 @@ function openLoadout(runType = "main") {
   ui.loadoutModal.classList.remove("hidden");
 }
 
-function startGame(classId = selectedRunClass, runType = pendingRunType) {
+async function startGame(classId = selectedRunClass, runType = pendingRunType) {
+  if (assetLaunchPending) return;
   if (!isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
     showToast(getSceneLockedMessage());
     return;
@@ -1016,6 +1130,20 @@ function startGame(classId = selectedRunClass, runType = pendingRunType) {
   refreshDailyState();
   const energyCost = getRunEnergyCost(runType);
   if (meta.energy.current < energyCost) { ui.loadoutModal.classList.add("hidden"); showToast("体力不足，点击顶部体力恢复"); return; }
+  assetLaunchPending = true;
+  ui.loadoutModal.classList.add("asset-loading");
+  ui.classChoices.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  document.querySelector("#loadoutTitle").textContent = "正在装载战场素材";
+  document.querySelector(".loadout-hint").textContent = "正在校验角色、敌人、背景与灵宠资源；弱网会自动切换兼容素材。";
+  let assetsReady = false;
+  try {
+    assetsReady = await prepareSceneAssets(scenes[selectedSceneIndex].id);
+  } catch (error) {
+    assetsReady = false;
+  }
+  assetLaunchPending = false;
+  ui.loadoutModal.classList.remove("asset-loading");
+  if (!assetsReady) showToast("部分素材仍在加载，已启用兼容占位并后台重试");
   unlockAudio();
   selectedRunClass = classId;
   lastRunType = runType;
@@ -1481,21 +1609,28 @@ function drawCompanionPet() {
   const position = getCompanionPetPosition();
   const bob = Math.sin(ambienceTime * 5.2) * 2.5;
   ctx.save(); ctx.translate(position.x, position.y + bob);
-  ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(0, 11 - bob, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.shadowColor = pet.color; ctx.shadowBlur = 12; ctx.fillStyle = colorAlpha(pet.color, .92);
-  if (pet.id === "emberFox") {
-    ctx.beginPath(); ctx.ellipse(0, 0, 12, 8, -.15, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(-7,-6);ctx.lineTo(-3,-17);ctx.lineTo(1,-7);ctx.moveTo(5,-6);ctx.lineTo(10,-16);ctx.lineTo(12,-4);ctx.fill();
-    ctx.strokeStyle = pet.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(-10, 1, 15, 1.7, 4.8); ctx.stroke();
-  } else if (pet.id === "warHound") {
-    ctx.fillRect(-12,-8,22,16); ctx.fillStyle="#dff9ff"; ctx.fillRect(7,-6,9,10);
-    ctx.strokeStyle=pet.color;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-8,7);ctx.lineTo(-10,15);ctx.moveTo(6,7);ctx.lineTo(8,15);ctx.stroke();
+  ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.beginPath(); ctx.ellipse(0, 19 - bob, 22, 6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = "lighter";
+  const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 37);
+  aura.addColorStop(0, colorAlpha(pet.color, .22)); aura.addColorStop(1, colorAlpha(pet.color, 0));
+  ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, 0, 37, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+  if (companionAtlas.complete && companionAtlas.naturalWidth) {
+    const sourceWidth = companionAtlas.naturalWidth / 3;
+    const facing = Math.cos(ambienceTime * .9 + Math.PI * .72) < 0 ? -1 : 1;
+    const attackPulse = game.player.companionPetTimer > pet.interval - .16 ? Math.sin((pet.interval - game.player.companionPetTimer) / .16 * Math.PI) : 0;
+    ctx.scale(facing, 1);
+    ctx.rotate(Math.sin(ambienceTime * 3.1) * .025 - attackPulse * .07);
+    ctx.shadowColor = pet.color; ctx.shadowBlur = 14 + attackPulse * 12;
+    const width = pet.id === "warHound" ? 78 : 72;
+    const height = pet.id === "herbSprite" ? 63 : 66;
+    ctx.drawImage(companionAtlas, sourceWidth * pet.spriteIndex, 0, sourceWidth, companionAtlas.naturalHeight, -width / 2, -height * .69, width, height);
   } else {
-    ctx.beginPath(); ctx.arc(0,-1,11,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle="#effff4"; ctx.fillRect(-2,-8,4,14); ctx.fillRect(-7,-3,14,4);
-    ctx.strokeStyle=pet.color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,-1,17,0,Math.PI*2);ctx.stroke();
+    ctx.shadowColor = pet.color; ctx.shadowBlur = 12; ctx.fillStyle = colorAlpha(pet.color, .92);
+    ctx.beginPath(); ctx.ellipse(0, 0, 15, 10, -.1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(12, -7, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = pet.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(-11, 1, 18, 1.7, 4.8); ctx.stroke();
   }
-  ctx.shadowBlur = 0; ctx.fillStyle="#12221b"; ctx.beginPath();ctx.arc(4,-2,1.5,0,Math.PI*2);ctx.fill();
   ctx.restore();
 }
 
@@ -1553,7 +1688,8 @@ function enemyStats(type) {
   const adaptiveScale = .62 + game.director * .46;
   const health = Math.round(base.hp * (type === "boss" ? bossScale : hpScale) * realmScale * adaptiveScale * (game.scene.endless && type === "boss" ? endlessOpeningScale : 1));
   const damageScale = game.scene.endless ? Math.pow(1.3, Math.max(0, realmGap)) : Math.sqrt(realmScale);
-  const damage = Math.round(base.damage * damageScale * (.68 + game.director * .38) * (divineFinaleGate ? 1.55 : 1) * endlessOpeningScale);
+  const minionDamageBoost = type === "boss" ? 1 : 1.14;
+  const damage = Math.round(base.damage * damageScale * (.68 + game.director * .38) * (divineFinaleGate ? 1.55 : 1) * endlessOpeningScale * minionDamageBoost);
   return { ...base, realm, divineFinaleGate, speed: base.speed * game.levelModifier.speed * (game.scene.endless ? Math.min(1.36, 1 + Math.max(0, realmGap) * .055) : 1), damage, hp: health, maxHp: health };
 }
 
@@ -1932,6 +2068,35 @@ function applyAttackIdentity(bullet, enemy, x, y, angle) {
     default:
       break;
   }
+
+  const synergy = game.player.activeSynergy;
+  if (!synergy || bullet.synergyTriggered) return;
+  bullet.synergyTriggered = true;
+  const classId = game.player.combatClass.id;
+  if (classId === "melee") {
+    const radius = 58 + game.player.explosionRadius * .18;
+    splash(radius, .3, synergy.color);
+    for (const entry of livingNearby(radius)) {
+      const pushAngle = Math.atan2(entry.y - y, entry.x - x);
+      const push = entry.type === "boss" ? 3 : 12;
+      entry.x += Math.cos(pushAngle) * push;
+      entry.y += Math.sin(pushAngle) * push;
+    }
+    makeDirectionalParticles(x, y, synergy.color, 10, 145, angle, 1.05, "shard");
+  } else if (classId === "ranger") {
+    const chained = livingNearby(125).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
+    if (chained) {
+      damageEnemy(chained, bullet.damage * .46, false, true);
+      const chainAngle = Math.atan2(chained.y - y, chained.x - x);
+      makeDirectionalParticles(x, y, synergy.color, 8, 190, chainAngle, .22, "spark");
+      game.shockwaves.push({ x: chained.x, y: chained.y, radius: 2, maxRadius: 20, life: .2, color: synergy.color });
+    }
+  } else {
+    const radius = 72 + game.player.explosionRadius * .16;
+    splash(radius, .34, synergy.color);
+    for (const entry of livingNearby(radius)) entry.slowTimer = Math.max(entry.slowTimer, 2.1);
+    makeDirectionalParticles(x, y, synergy.color, 12, 125, angle, 1.4, "glyph");
+  }
 }
 
 function getBossImpactSpec(sceneId = game.scene.id) {
@@ -2039,7 +2204,7 @@ function fireEnemyProjectile(enemy) {
   const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
   const caster = enemy.type === "caster";
   const speed = caster ? 132 : 172;
-  const damage = Math.round((caster ? 58 : 50) * (0.9 + game.difficulty * .1) * (.92 + game.director * .08));
+  const damage = Math.round((caster ? 64 : 55) * (0.9 + game.difficulty * .1) * (.92 + game.director * .08));
   game.enemyProjectiles.push({
     x: enemy.x,
     y: enemy.y - enemy.size * .35,
@@ -2229,7 +2394,7 @@ function killEnemy(enemy) {
     game.health = Math.min(game.maxHealth, game.health + lotusHeal);
     if (enemy.type === "boss") addFloater(game.player.x, game.player.y - 47, `金莲 +${lotusHeal}`, "#ffe79a", 10);
   }
-  const medkitChance = .2 + (game.player.companionPet?.medkitBonus || 0);
+  const medkitChance = .1 + (game.player.companionPet?.medkitBonus || 0);
   if (game.medkits.length < EFFECT_LIMITS.medkits && (enemy.type === "boss" || Math.random() < medkitChance)) {
     game.medkits.push({ x: enemy.x + rand(-9,9), y: enemy.y + rand(-7,7), age: 0, pulse: rand(0, Math.PI * 2), collected: false });
     addFloater(enemy.x, enemy.y - enemy.size - 4, "急救血包", "#7dffac", 9);
@@ -2447,24 +2612,39 @@ function showUpgradeChoices() {
     (!entry.cultivationOnly || game.scene.endless)
     && (!entry.classes || entry.classes.includes(game.player.combatClass.id))
     && (game.scene.endless || (game.player.upgrades[entry.id] || 0) < entry.max));
+  const group = getSceneSkillGroup();
+  const pathIds = group ? [group.core, group.link, group.aux] : [];
   const classPath = available.filter((entry) => entry.classes);
   const cultivationPath = available.filter((entry) => entry.cultivationOnly).sort(() => Math.random() - 0.5);
   const commonPath = available.filter((entry) => !entry.classes && !entry.cultivationOnly).sort(() => Math.random() - 0.5);
-  const shuffled = game.scene.endless
-    ? [...cultivationPath.slice(0, 2), ...classPath.sort(() => Math.random() - 0.5).slice(0, 1), ...commonPath].slice(0, 3)
-    : [...classPath.sort(() => Math.random() - 0.5).slice(0, 1), ...commonPath].slice(0, 3);
+  const pathPriority = !group ? []
+    : game.player.upgrades[group.core] ? (game.player.upgrades[group.link] ? [group.core, group.link, group.aux] : [group.link, group.core, group.aux])
+    : [group.core, group.aux, group.link];
+  const pathChoice = pathPriority.map((id) => available.find((entry) => entry.id === id)).find(Boolean);
+  const shuffled = [];
+  if (pathChoice) shuffled.push(pathChoice);
+  if (game.scene.endless) {
+    const cultivationChoice = cultivationPath.find((entry) => !shuffled.includes(entry));
+    if (cultivationChoice) shuffled.push(cultivationChoice);
+  } else {
+    const classChoice = classPath.sort(() => Math.random() - 0.5).find((entry) => !shuffled.includes(entry));
+    if (classChoice) shuffled.push(classChoice);
+  }
+  const secondaryPool = [...commonPath, ...cultivationPath, ...classPath].filter((entry) => !shuffled.includes(entry));
+  for (const entry of secondaryPool) {
+    if (shuffled.length >= 3) break;
+    shuffled.push(entry);
+  }
   ui.choices.innerHTML = "";
 
   for (const definition of shuffled) {
     const current = game.player.upgrades[definition.id] || 0;
-    const specialistCopy = game.player.combatClass.id === "mage" ? sceneSpecialistUpgradeNames[game.scene.id]?.[definition.id] : null;
-    const scenePresentation = specialistCopy ? { name: specialistCopy[0], description: specialistCopy[1] } : null;
-    const classPresentation = scenePresentation || classUpgradeNames[game.player.combatClass.id]?.[definition.id];
-    const presentation = game.scene.endless ? cultivationUpgradeNames[definition.id] || classPresentation || definition : classPresentation || definition;
+    const presentation = getUpgradePresentation(definition);
     const visiblePips = Math.min(5, definition.max);
     const nextRank = current + 1;
     const button = document.createElement("button");
     button.className = "upgrade-card";
+    if (pathIds.includes(definition.id)) button.dataset.pathSkill = "true";
     button.innerHTML = `
       <span class="upgrade-icon">${definition.icon}</span>
       <span>
@@ -2483,6 +2663,7 @@ function chooseUpgrade(definition) {
   player.upgrades[definition.id] = nextRank;
   if (game.scene.endless && nextRank > definition.max && !definition.cultivationOnly) applyEndlessOverflow(definition.id, player);
   else definition.apply(player);
+  activateHiddenSkillSynergy(player);
   game.pendingLevels -= 1;
   tone(460, 0.12, "triangle", 0.04, 1.6);
   if (game.pendingLevels > 0) showUpgradeChoices();
@@ -2490,6 +2671,31 @@ function chooseUpgrade(definition) {
     ui.upgrade.classList.add("hidden");
     paused = false;
   }
+}
+
+function activateHiddenSkillSynergy(player) {
+  const group = getSceneSkillGroup();
+  if (!group || !player.upgrades[group.core] || !player.upgrades[group.link] || player.synergies[group.synergy]) return;
+  player.synergies[group.synergy] = true;
+  player.activeSynergy = group;
+  if (player.combatClass.id === "melee") {
+    player.damage *= 1.12;
+    player.explosionRadius += 16;
+  } else if (player.combatClass.id === "ranger") {
+    player.fireInterval = Math.max(.13, player.fireInterval * .78);
+    player.pierce += 2;
+    player.damage *= 1.08;
+  } else {
+    player.explosionChance = Math.min(.86, player.explosionChance + .2);
+    player.explosionRadius += 20;
+    player.slowChance = Math.min(.9, player.slowChance + .12);
+  }
+  game.banner = { text: group.synergy, sub: "技能共鸣已发生质变", time: 2.2 };
+  game.flash = Math.max(game.flash, .34);
+  game.shockwaves.push({ x: player.x, y: player.y, radius: 8, maxRadius: 108, life: .82, color: group.color });
+  makeParticles(player.x, player.y - 10, group.color, 24, 190);
+  tone(330, .12, "sine", .045, 1.7);
+  setTimeout(() => tone(660, .18, "triangle", .04, 1.45), 90);
 }
 
 function applyEndlessOverflow(id, player) {
@@ -2778,7 +2984,7 @@ function renderDivineGearCard() {
 
 function renderPetRoster() {
   if (!ui.petRoster) return;
-  ui.petRoster.innerHTML = petDefinitions.map((pet) => `<button class="pet-card${meta.pet.selected === pet.id ? " active" : ""}" data-pet="${pet.id}" style="--pet-color:${pet.color}"><i>${pet.icon}</i><b>${pet.name}</b><small>${pet.detail}</small></button>`).join("");
+  ui.petRoster.innerHTML = petDefinitions.map((pet) => `<button class="pet-card${meta.pet.selected === pet.id ? " active" : ""}" data-pet="${pet.id}" style="--pet-color:${pet.color};--pet-x:${pet.spriteIndex * 50}%"><i class="pet-portrait pet-${pet.id}" aria-hidden="true"></i><b>${pet.name}</b><small>${pet.detail}</small></button>`).join("");
   for (const button of ui.petRoster.querySelectorAll(".pet-card")) {
     button.addEventListener("click", () => {
       meta.pet.selected = button.dataset.pet;
@@ -3583,17 +3789,19 @@ function drawBattlefield() {
   for (const warning of game.bossWarnings) drawBossWarning(warning);
   // Player and enemies share one Canvas2D actor layer. Sorting by their
   // ground-contact point makes feet, shadows and bodies occlude naturally.
-  const actors = [...game.enemies, game.player];
+  const petPosition = game.player.companionPet ? getCompanionPetPosition() : null;
+  const companionActor = petPosition ? { companion: true, ...petPosition } : null;
+  const actors = [...game.enemies, game.player, ...(companionActor ? [companionActor] : [])];
   actors.sort((a, b) => {
-    const aDepth = a === game.player ? a.y + 30 : a.y + a.size * .92;
-    const bDepth = b === game.player ? b.y + 30 : b.y + b.size * .92;
+    const aDepth = a === game.player ? a.y + 30 : a.companion ? a.y + 19 : a.y + a.size * .92;
+    const bDepth = b === game.player ? b.y + 30 : b.companion ? b.y + 19 : b.y + b.size * .92;
     return aDepth - bDepth;
   });
   for (const actor of actors) {
     if (actor === game.player) drawBase();
+    else if (actor.companion) drawCompanionPet();
     else drawEnemy(actor);
   }
-  drawCompanionPet();
   for (const projectile of game.enemyProjectiles) drawEnemyProjectile(projectile);
   for (const bullet of game.bullets) drawBullet(bullet);
   for (const burst of game.impactBursts) drawImpactBurst(burst);
@@ -6036,7 +6244,15 @@ if (QA_MODE) {
 }
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(() => {}));
+  window.addEventListener("load", async () => {
+    try {
+      const registration = await navigator.serviceWorker.register("./service-worker.js?v=43", { updateViaCache: "none" });
+      await registration.update();
+      registration.waiting?.postMessage("SKIP_WAITING");
+    } catch (error) {
+      // The game stays fully playable without offline caching.
+    }
+  });
 }
 
 renderHome();

@@ -376,9 +376,10 @@ h1 {
 
 .pet-hangar { padding:10px; border:1px solid color-mix(in srgb,var(--acid) 16%,transparent); border-radius:15px; background:color-mix(in srgb,var(--ui-panel) 82%,transparent); }
 .pet-roster { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:8px; }
-.pet-card { min-height:84px; padding:8px 5px; border:1px solid color-mix(in srgb,var(--pet-color) 28%,transparent); border-radius:12px; background:linear-gradient(160deg,color-mix(in srgb,var(--pet-color) 11%,var(--ui-raised)),var(--ui-panel)); text-align:center; }
+.pet-card { min-height:112px; padding:5px 5px 8px; overflow:hidden; border:1px solid color-mix(in srgb,var(--pet-color) 28%,transparent); border-radius:12px; background:linear-gradient(160deg,color-mix(in srgb,var(--pet-color) 11%,var(--ui-raised)),var(--ui-panel)); text-align:center; }
 .pet-card.active { border-color:var(--pet-color); box-shadow:inset 0 0 18px color-mix(in srgb,var(--pet-color) 15%,transparent),0 0 12px color-mix(in srgb,var(--pet-color) 12%,transparent); }
-.pet-card i { display:block; color:var(--pet-color); font-size:24px; font-style:normal; text-shadow:0 0 10px color-mix(in srgb,var(--pet-color) 70%,transparent); }
+.pet-card i.pet-portrait { width:100%; height:57px; display:block; border-radius:9px; background-image:url("./assets/companions-v1.png"); background-repeat:no-repeat; background-size:300% auto; background-position:var(--pet-x) 48%; filter:drop-shadow(0 6px 7px rgba(0,0,0,.54)); transform:scale(1.06); transition:transform .2s ease,filter .2s ease; }
+.pet-card.active i.pet-portrait { transform:scale(1.13) translateY(-1px); filter:drop-shadow(0 7px 9px rgba(0,0,0,.58)) drop-shadow(0 0 7px var(--pet-color)); }
 .pet-card b { display:block; margin-top:3px; font-size:8px; }
 .pet-card small { display:block; margin-top:3px; color:var(--ui-muted); font-size:6px; line-height:1.35; }
 
@@ -917,6 +918,10 @@ h1 {
 
 .loadout-card > h2 { margin-bottom: 5px; }
 .loadout-hint { margin: 0 0 13px; color: #829087; font-size: 9px; line-height: 1.55; }
+.modal-screen.asset-loading .loadout-card { border-color:color-mix(in srgb,var(--acid) 45%,transparent); box-shadow:0 0 38px color-mix(in srgb,var(--acid) 13%,transparent); }
+.modal-screen.asset-loading .class-choices { opacity:.38; filter:saturate(.45); pointer-events:none; }
+.modal-screen.asset-loading .loadout-card::after { content:""; display:block; width:27px; height:27px; margin:12px auto 0; border:3px solid color-mix(in srgb,var(--acid) 18%,transparent); border-top-color:var(--acid); border-radius:50%; animation:assetSpin .8s linear infinite; }
+@keyframes assetSpin { to { transform:rotate(360deg); } }
 .class-choices { display: grid; gap: 8px; }
 .class-card { min-height: 108px; display: grid; grid-template-columns:auto 1fr auto; align-items: center; gap: 11px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--class-color) 30%, transparent); border-radius: 14px; background: linear-gradient(110deg,color-mix(in srgb,var(--class-color) 9%,var(--ui-raised)),var(--ui-panel)); text-align: left; }
 .class-card > i { width:var(--portrait-w,48px); height:var(--portrait-h,96px); display:block; flex:none; border-radius:13px; background-color:color-mix(in srgb,var(--class-color) 13%,transparent); background-image:url("./assets/posters/original/hero-archetypes-v1.webp"); background-repeat:no-repeat; background-size:300% auto; background-position-y:center; font-style:normal; filter:drop-shadow(0 5px 7px rgba(0,0,0,.4)); }
@@ -1022,7 +1027,7 @@ h1 {
 .command-panel,.world-panel,.meta-panel,.armory-panel { flex:1 1 auto; min-height:0; overflow:auto; scrollbar-width:none; }
 .command-panel::-webkit-scrollbar,.world-panel::-webkit-scrollbar,.meta-panel::-webkit-scrollbar,.armory-panel::-webkit-scrollbar { display:none; }
 .command-panel { position:relative; display:flex; flex-direction:column; padding-right:72px; }
-.lobby-stage { --lobby-bg:url("./assets/city-battlefield-v1.webp"); position:relative; min-height:468px; flex:1; margin-top:8px; overflow:hidden; border:1px solid color-mix(in srgb,var(--acid) 22%,transparent); border-radius:22px; background-image:linear-gradient(180deg,rgba(3,8,8,.04),color-mix(in srgb,var(--scene-dark) 93%,transparent) 85%),var(--lobby-bg); background-size:cover; background-position:center; box-shadow:inset 0 1px rgba(255,255,255,.06),0 17px 40px rgba(0,0,0,.25); }
+.lobby-stage { --lobby-bg:url("./assets/fallback/city-battlefield-v1.jpg"); position:relative; min-height:468px; flex:1; margin-top:8px; overflow:hidden; border:1px solid color-mix(in srgb,var(--acid) 22%,transparent); border-radius:22px; background-image:linear-gradient(180deg,rgba(3,8,8,.04),color-mix(in srgb,var(--scene-dark) 93%,transparent) 85%),var(--lobby-bg); background-size:cover; background-position:center; box-shadow:inset 0 1px rgba(255,255,255,.06),0 17px 40px rgba(0,0,0,.25); }
 .lobby-stage::before { content:""; position:absolute; inset:0; background:linear-gradient(90deg,rgba(0,0,0,.32),transparent 38%,transparent 68%,rgba(0,0,0,.18)); pointer-events:none; }
 .lobby-atmosphere { position:absolute; inset:0; background:radial-gradient(circle at 60% 54%,color-mix(in srgb,var(--acid) 20%,transparent),transparent 25%); animation:lobbyBreathe 3.4s ease-in-out infinite; }
 @keyframes lobbyBreathe { 50% { opacity:.55; transform:scale(1.06); } }
@@ -1030,7 +1035,7 @@ h1 {
 .lobby-mission small { padding:4px 7px; border:1px solid color-mix(in srgb,var(--acid) 18%,transparent); border-radius:7px; color:var(--acid); background:color-mix(in srgb,var(--ui-shell) 68%,transparent); font-size:7px; letter-spacing:.08em; }
 .lobby-mission strong { margin-top:8px; font-size:17px; letter-spacing:.05em; text-shadow:0 3px 12px rgba(0,0,0,.7); }
 .lobby-mission span { margin-top:3px; color:#bdc9c2; font-size:8px; text-shadow:0 2px 8px #000; }
-.lobby-hero { position:absolute;z-index:2;left:50%;top:50%;width:var(--lobby-hero-w,180px);height:var(--lobby-hero-h,360px);transform:translate(-40%,-44%);background-image:url("./assets/posters/original/city-heroes-v1.webp");background-repeat:no-repeat;background-position:50% center;background-size:300% auto;filter:drop-shadow(0 18px 15px rgba(0,0,0,.62));animation:lobbyIdle 3.1s ease-in-out infinite; }
+.lobby-hero { position:absolute;z-index:2;left:50%;top:50%;width:var(--lobby-hero-w,180px);height:var(--lobby-hero-h,360px);transform:translate(-40%,-44%);background-image:url("./assets/fallback/posters/original/city-heroes-v1.png");background-repeat:no-repeat;background-position:50% center;background-size:300% auto;filter:drop-shadow(0 18px 15px rgba(0,0,0,.62));animation:lobbyIdle 3.1s ease-in-out infinite; }
 @keyframes lobbyIdle { 50% { transform:translate(-40%,-45.2%) rotate(.7deg); } }
 .lobby-loadout { position:absolute; z-index:4; right:14px; bottom:17px; display:flex; flex-direction:column; align-items:flex-end; padding:7px 9px; border-right:2px solid var(--acid); background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--ui-shell) 72%,transparent)); text-shadow:0 2px 8px #000; }
 .lobby-loadout span { font-size:10px; font-weight:900; }
@@ -1069,20 +1074,37 @@ h1 {
 .gear-bonus-list i { padding:4px 6px;border-radius:7px;color:#dcebe2;background:rgba(255,255,255,.045);font-size:6px;font-style:normal; }
 .gear-item.equipped { box-shadow:inset 3px 0 var(--rarity),0 0 18px color-mix(in srgb,var(--rarity) 10%,transparent); }
 
-#app[data-scene="city"] .lobby-stage { --lobby-bg:url("./assets/city-battlefield-v1.webp"); }
-#app[data-scene="snow"] .lobby-stage { --lobby-bg:url("./assets/snow-battlefield-v1.webp"); }
-#app[data-scene="hospital"] .lobby-stage { --lobby-bg:url("./assets/hospital-battlefield-v1.webp"); }
-#app[data-scene="orbit"] .lobby-stage { --lobby-bg:url("./assets/orbit-battlefield-v1.webp"); }
-#app[data-scene="mars"] .lobby-stage { --lobby-bg:url("./assets/mars-battlefield-v1.webp"); }
-#app[data-scene="moon"] .lobby-stage { --lobby-bg:url("./assets/moon-battlefield-v1.webp"); }
-#app[data-scene="cultivation"] .lobby-stage { --lobby-bg:url("./assets/cultivation-battlefield-v1.webp"); }
-#app[data-scene="city"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/city-heroes-v1.webp"); }
-#app[data-scene="snow"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/snow-heroes-v1.webp"); }
-#app[data-scene="hospital"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/hospital-heroes-v1.webp"); }
-#app[data-scene="orbit"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/orbit-ships-v1.webp"); }
-#app[data-scene="mars"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/mars-heroes-v1.webp"); }
-#app[data-scene="moon"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/moon-heroes-v1.webp"); }
-#app[data-scene="cultivation"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/posters/original/cultivator-heroes-v1.webp"); }
+#app[data-scene="city"] .lobby-stage { --lobby-bg:url("./assets/fallback/city-battlefield-v1.jpg"); }
+#app[data-scene="snow"] .lobby-stage { --lobby-bg:url("./assets/fallback/snow-battlefield-v1.jpg"); }
+#app[data-scene="hospital"] .lobby-stage { --lobby-bg:url("./assets/fallback/hospital-battlefield-v1.jpg"); }
+#app[data-scene="orbit"] .lobby-stage { --lobby-bg:url("./assets/fallback/orbit-battlefield-v1.jpg"); }
+#app[data-scene="mars"] .lobby-stage { --lobby-bg:url("./assets/fallback/mars-battlefield-v1.jpg"); }
+#app[data-scene="moon"] .lobby-stage { --lobby-bg:url("./assets/fallback/moon-battlefield-v1.jpg"); }
+#app[data-scene="cultivation"] .lobby-stage { --lobby-bg:url("./assets/fallback/cultivation-battlefield-v1.jpg"); }
+#app[data-scene="city"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/city-heroes-v1.png"); }
+#app[data-scene="snow"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/snow-heroes-v1.png"); }
+#app[data-scene="hospital"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/hospital-heroes-v1.png"); }
+#app[data-scene="orbit"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/orbit-ships-v1.png"); }
+#app[data-scene="mars"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/mars-heroes-v1.png"); }
+#app[data-scene="moon"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/moon-heroes-v1.png"); }
+#app[data-scene="cultivation"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:url("./assets/fallback/posters/original/cultivator-heroes-v1.png"); }
+
+@supports (background-image:image-set(url("./assets/city-battlefield-v1.webp") type("image/webp"))) {
+  html:not(.compat-assets) #app[data-scene="city"] .lobby-stage { --lobby-bg:image-set(url("./assets/city-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/city-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="snow"] .lobby-stage { --lobby-bg:image-set(url("./assets/snow-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/snow-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="hospital"] .lobby-stage { --lobby-bg:image-set(url("./assets/hospital-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/hospital-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="orbit"] .lobby-stage { --lobby-bg:image-set(url("./assets/orbit-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/orbit-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="mars"] .lobby-stage { --lobby-bg:image-set(url("./assets/mars-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/mars-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="moon"] .lobby-stage { --lobby-bg:image-set(url("./assets/moon-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/moon-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="cultivation"] .lobby-stage { --lobby-bg:image-set(url("./assets/cultivation-battlefield-v1.webp") type("image/webp"),url("./assets/fallback/cultivation-battlefield-v1.jpg") type("image/jpeg")); }
+  html:not(.compat-assets) #app[data-scene="city"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/city-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/city-heroes-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="snow"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/snow-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/snow-heroes-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="hospital"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/hospital-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/hospital-heroes-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="orbit"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/orbit-ships-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/orbit-ships-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="mars"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/mars-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/mars-heroes-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="moon"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/moon-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/moon-heroes-v1.png") type("image/png")); }
+  html:not(.compat-assets) #app[data-scene="cultivation"] :is(.lobby-hero,.profile-portrait,.scene-hero) { background-image:image-set(url("./assets/posters/original/cultivator-heroes-v1.webp") type("image/webp"),url("./assets/fallback/posters/original/cultivator-heroes-v1.png") type("image/png")); }
+}
 .lobby-hero,.profile-portrait,.scene-hero { background-repeat:no-repeat;background-size:300% auto;background-position:50% center; }
 .lobby-hero[data-class-id="melee"],.profile-portrait[data-class-id="melee"],.scene-hero[data-class-id="melee"] { background-position:0 center; }
 .lobby-hero[data-class-id="ranger"],.profile-portrait[data-class-id="ranger"],.scene-hero[data-class-id="ranger"] { background-position:50% center; }
