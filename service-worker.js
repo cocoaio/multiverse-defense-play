@@ -1,6 +1,6 @@
-const CACHE_NAME = "multiverse-defense-v41";
+const CACHE_NAME = "multiverse-defense-v42";
 const ASSETS = [
-  "./", "./index.html", "./styles.css?v=41", "./game.js?v=41", "./manifest.webmanifest", "./icon.svg",
+  "./", "./index.html", "./styles.css?v=42", "./game.js?v=42", "./manifest.webmanifest", "./icon.svg",
   "./assets/city-battlefield-v1.webp", "./assets/posters/original/city-heroes-v1.webp", "./assets/city-zombies-v2.png",
 ];
 

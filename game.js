@@ -100,6 +100,7 @@ const ui = {
   basePanel: $("#basePanel"),
   armoryPanel: $("#armoryPanel"),
   gearCollection: $("#gearCollection"),
+  petRoster: $("#petRoster"),
   divineGearCard: $("#divineGearCard"),
   equippedGear: $("#equippedGear"),
   armoryAvatarPreview: $("#armoryAvatarPreview"),
@@ -176,13 +177,13 @@ const ui = {
   toast: $("#toast"),
 };
 
-const STORAGE_KEY = "multiverse-defense-save-v5";
 const TOTAL_WAVES = 6;
 const LEVELS_PER_SCENE = 12;
 const QA_MODE = new URLSearchParams(location.search).get("qa") === "internal";
 const ADMIN_MODE = location.protocol === "file:" || new URLSearchParams(location.search).get("admin") === "owner";
+const STORAGE_KEY = ADMIN_MODE ? "multiverse-defense-admin-v1" : "multiverse-defense-save-v5";
 const BASE_Y = 752;
-const EFFECT_LIMITS = { particles: 420, floaters: 70, bursts: 96, shockwaves: 72, corpses: 110, xpDrops: 170, bullets: 220 };
+const EFFECT_LIMITS = { particles: 420, floaters: 70, bursts: 96, shockwaves: 72, corpses: 110, xpDrops: 170, medkits: 28, bullets: 220 };
 const ENEMY_GRID_SIZE = 128;
 const enemyGridKey = (x, y) => (x + 32768) * 65536 + y + 32768;
 
@@ -346,6 +347,12 @@ const divineGearDefinitions = {
   mage: { icon: "✦", name: "万象神谕法典", attack: "万象增幅" },
 };
 
+const petDefinitions = [
+  { id: "emberFox", icon: "狐", name: "赤焰灵狐", detail: "快速追踪弹 · 均衡输出", color: "#ff9a63", interval: .9, damage: .46, style: "orb" },
+  { id: "warHound", icon: "獒", name: "玄甲战獒", detail: "重击剑气 · 高额单伤", color: "#8de5ff", interval: 1.35, damage: .82, style: "blade" },
+  { id: "herbSprite", icon: "药", name: "青萝药灵", detail: "血包掉率提升至 28%", color: "#7dffb0", interval: 1.55, damage: .3, style: "orb", medkitBonus: .08 },
+];
+
 const defaultMeta = {
   coins: 0,
   bestWave: 0,
@@ -364,6 +371,7 @@ const defaultMeta = {
   dungeon: { date: "", entries: 3, clears: 0 },
   activities: { date: "", signIn: false, gearAd: false, avatarAd: false, dungeonGift: false },
   skins: { owned: ["default"], equipped: "default" },
+  pet: { selected: "emberFox" },
   energy: { date: "", current: 8, max: 8, adRestores: 0 },
 };
 
@@ -387,6 +395,7 @@ function loadMeta() {
       dungeon: { ...defaultMeta.dungeon, ...(saved?.dungeon || {}) },
       activities: { ...defaultMeta.activities, ...(saved?.activities || {}) },
       skins: { ...defaultMeta.skins, ...(saved?.skins || {}), owned: Array.isArray(saved?.skins?.owned) ? saved.skins.owned : ["default"] },
+      pet: { ...defaultMeta.pet, ...(saved?.pet || {}) },
       energy: { ...defaultMeta.energy, ...(saved?.energy || {}) },
     };
   } catch {
@@ -395,6 +404,14 @@ function loadMeta() {
 }
 
 let meta = loadMeta();
+if (ADMIN_MODE) {
+  meta.coins = 999999;
+  meta.energy = { date: todayKey(), current: 99, max: 99, adRestores: 0 };
+  meta.skins.owned = skinDefinitions.map((skin) => skin.id);
+  for (const scene of scenes) meta.progress[scene.id] = scene.endless ? 0 : LEVELS_PER_SCENE;
+  for (const id of Object.keys(meta.upgrades)) meta.upgrades[id] = 10;
+  for (const state of Object.values(meta.divineGear)) { state.unlocked = true; state.level = Math.max(12, state.level || 1); }
+}
 if (meta.gearSystemVersion !== 2) {
   const legacyClass = classDefinitions.some((entry) => entry.id === meta.selectedClass) ? meta.selectedClass : "ranger";
   if (meta.equippedGear) meta.classGear[legacyClass] = { ...meta.classGear[legacyClass], ...meta.equippedGear };
@@ -404,7 +421,7 @@ if (meta.gearSystemVersion !== 2) {
 refreshDailyState();
 saveMeta();
 let game = null;
-let mode = QA_MODE ? "home" : "login";
+let mode = QA_MODE || ADMIN_MODE ? "home" : "login";
 let paused = false;
 let manuallyPaused = false;
 let muted = false;
@@ -419,7 +436,7 @@ let selectedRunClass = meta.selectedClass || "ranger";
 let pendingRunType = "main";
 let lastRunType = "main";
 const movementKeys = new Set();
-const pointerMove = { x: W / 2, y: H / 2, active: false, touchId: null };
+const pointerMove = { x: W / 2, y: H / 2, originX: W / 2, originY: H / 2, active: false, touchId: null, touchMode: false };
 let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
 let selectedLevel = Math.max(1, Math.min(LEVELS_PER_SCENE, meta.currentLevel || 1));
 
@@ -462,6 +479,10 @@ function getEquippedSkin() {
 function getClassWeaponVisual(combatClass) {
   const base = classWeaponVisuals[combatClass.id] || classWeaponVisuals.ranger;
   return { ...base, color: combatClass.color };
+}
+
+function getSelectedPet() {
+  return petDefinitions.find((pet) => pet.id === meta.pet.selected) || petDefinitions[0];
 }
 
 function getGearById(id) {
@@ -844,6 +865,7 @@ function makeGame(runType = "main") {
   const divine = divineState.unlocked ? getDivineGearCombatStats(divineState.level, selectedSceneIndex) : { damage: 0, health: 0, crit: 0, pulse: 0 };
   const endlessNoviceGrace = scene.endless ? Math.max(0, Math.min(1, (360 - getCombatPower(combatClass.id)) / 260)) : 0;
   const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health) * (1 + endlessNoviceGrace * .45));
+  const missionTarget = runType === "resource" ? 45 : scene.endless ? Infinity : 26 + selectedSceneIndex * 6 + missionLevel * 3;
   const isDivineTutorialStage = selectedSceneIndex === 0 && missionLevel <= 2;
   const shouldDeliverDivineGear = runType === "main" && isDivineTutorialStage && !divineState.unlocked;
   return {
@@ -873,6 +895,10 @@ function makeGame(runType = "main") {
     shockwaves: [],
     groundMarks: [],
     xpDrops: [],
+    medkits: [],
+    missionTarget,
+    missionBossDefeated: false,
+    missionCompleteQueued: false,
     divineDelivery: shouldDeliverDivineGear ? { time: 0, dropped: false, collected: false, dropX: 0, dropY: 0 } : null,
     divineTrialActive: false,
     divineAwakening: 0,
@@ -896,6 +922,7 @@ function makeGame(runType = "main") {
     combo: 0,
     comboTimer: 0,
     shake: 0,
+    bossShock: 0,
     flash: 0,
     bossSpawned: false,
     lastBossWave: 0,
@@ -938,6 +965,8 @@ function makeGame(runType = "main") {
       supportDroneTimer: .35,
       orbitCoreTimer: 0,
       staggerTimer: 0,
+      companionPet: getSelectedPet(),
+      companionPetTimer: .45,
       spiritPetLevel: QA_MODE && scene.endless ? 3 : 0,
       spiritPets: QA_MODE && scene.endless ? 2 : 0,
       petTimer: .5,
@@ -994,7 +1023,7 @@ function startGame(classId = selectedRunClass, runType = pendingRunType) {
     if (meta.dungeon.entries <= 0) { showToast("今日丰饶之境次数已用完"); return; }
     meta.dungeon.entries -= 1;
   }
-  if (!QA_MODE) meta.energy.current -= energyCost;
+  if (!QA_MODE && !ADMIN_MODE) meta.energy.current -= energyCost;
   meta.selectedClass = classId;
   saveMeta();
   ui.loadoutModal.classList.add("hidden");
@@ -1139,6 +1168,7 @@ function update(dt) {
   updateDivineOverdrive(dt);
   game.invulnerable = Math.max(0, game.invulnerable - dt);
   game.shake = Math.max(0, game.shake - dt * 15);
+  game.bossShock = Math.max(0, game.bossShock - dt);
   game.player.staggerTimer = Math.max(0, game.player.staggerTimer - dt);
   game.player.muzzle = Math.max(0, game.player.muzzle - dt * 8);
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
@@ -1149,6 +1179,7 @@ function update(dt) {
   updatePlayerMovement(dt);
   updateDivineDelivery(dt);
   updateCultivationAbilities(dt);
+  updateCompanionPet(dt);
   updateSupportDrones(dt);
   updateOrbitGalaxyDefense(dt);
   updateDirector(dt);
@@ -1187,6 +1218,7 @@ function update(dt) {
   updateEnemyProjectiles(dt);
   updateBossWarnings(dt);
   updateXpDrops(dt);
+  updateMedkits(dt);
   updateEffects(dt);
   syncHud();
 }
@@ -1207,12 +1239,37 @@ function updateXpDrops(dt) {
       drop.collected = true;
       game.pickedXp += 1;
       gainXp(drop.value);
-      game.health = Math.min(game.maxHealth, game.health + Math.max(1, Math.round(game.maxHealth * .0035)));
       makeParticles(drop.x, drop.y, drop.color, 5, 70);
       tone(520 + Math.min(220, drop.value * 7), .045, "sine", .012, 1.3);
     }
   }
   game.xpDrops = game.xpDrops.filter((drop) => !drop.collected);
+}
+
+function updateMedkits(dt) {
+  const player = game.player;
+  for (const kit of game.medkits) {
+    kit.age += dt;
+    kit.pulse += dt * 4;
+    const dx = player.x - kit.x;
+    const dy = player.y - kit.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    if (game.health < game.maxHealth && distance < player.pickupRange * .7) {
+      const pull = Math.min(540, 130 + (player.pickupRange - distance) * 5);
+      kit.x += dx / distance * pull * dt;
+      kit.y += dy / distance * pull * dt;
+    }
+    if (game.health < game.maxHealth && distance < 19) {
+      kit.collected = true;
+      const heal = Math.max(1, Math.round(game.maxHealth * .2));
+      game.health = Math.min(game.maxHealth, game.health + heal);
+      addFloater(player.x, player.y - 48, `血包 +${heal}`, "#7dffac", 13);
+      game.shockwaves.push({ x: player.x, y: player.y, radius: 4, maxRadius: 52, life: .48, color: "#68ff9d" });
+      makeParticles(kit.x, kit.y, "#78ffac", 14, 115);
+      tone(640, .12, "sine", .03, 1.45);
+    }
+  }
+  game.medkits = game.medkits.filter((kit) => !kit.collected && kit.age < 22);
 }
 
 function activateDivineGearTrial() {
@@ -1398,6 +1455,50 @@ function updateCultivationAbilities(dt) {
   }
 }
 
+function getCompanionPetPosition() {
+  const angle = ambienceTime * .9 + Math.PI * .72;
+  return { x: game.player.x + Math.cos(angle) * 46, y: game.player.y + Math.sin(angle) * 24 + 8 };
+}
+
+function updateCompanionPet(dt) {
+  const player = game.player;
+  const pet = player.companionPet;
+  if (!pet) return;
+  player.companionPetTimer -= dt;
+  if (player.companionPetTimer > 0) return;
+  const origin = getCompanionPetPosition();
+  const target = game.enemies.filter((enemy) => !enemy.dead).sort((a, b) => Math.hypot(a.x - origin.x, a.y - origin.y) - Math.hypot(b.x - origin.x, b.y - origin.y))[0];
+  if (target && Math.hypot(target.x - origin.x, target.y - origin.y) < 390) {
+    launchCultivationShot(origin.x, origin.y - 8, target, player.damage * pet.damage, pet.color, pet.style);
+    makeDirectionalParticles(origin.x, origin.y - 8, pet.color, 4, 72, Math.atan2(target.y - origin.y, target.x - origin.x), .7, "spark");
+    player.companionPetTimer = pet.interval;
+  } else player.companionPetTimer = .18;
+}
+
+function drawCompanionPet() {
+  const pet = game.player.companionPet;
+  if (!pet) return;
+  const position = getCompanionPetPosition();
+  const bob = Math.sin(ambienceTime * 5.2) * 2.5;
+  ctx.save(); ctx.translate(position.x, position.y + bob);
+  ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(0, 11 - bob, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = pet.color; ctx.shadowBlur = 12; ctx.fillStyle = colorAlpha(pet.color, .92);
+  if (pet.id === "emberFox") {
+    ctx.beginPath(); ctx.ellipse(0, 0, 12, 8, -.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-7,-6);ctx.lineTo(-3,-17);ctx.lineTo(1,-7);ctx.moveTo(5,-6);ctx.lineTo(10,-16);ctx.lineTo(12,-4);ctx.fill();
+    ctx.strokeStyle = pet.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(-10, 1, 15, 1.7, 4.8); ctx.stroke();
+  } else if (pet.id === "warHound") {
+    ctx.fillRect(-12,-8,22,16); ctx.fillStyle="#dff9ff"; ctx.fillRect(7,-6,9,10);
+    ctx.strokeStyle=pet.color;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-8,7);ctx.lineTo(-10,15);ctx.moveTo(6,7);ctx.lineTo(8,15);ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(0,-1,11,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#effff4"; ctx.fillRect(-2,-8,4,14); ctx.fillRect(-7,-3,14,4);
+    ctx.strokeStyle=pet.color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,-1,17,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.shadowBlur = 0; ctx.fillStyle="#12221b"; ctx.beginPath();ctx.arc(4,-2,1.5,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+
 function updateDirector(dt) {
   game.directorTimer -= dt;
   if (game.directorTimer > 0) return;
@@ -1476,6 +1577,8 @@ function spawnEnemy(type, x, y, forcedAngle) {
     x,
     y,
     sway: rand(0, Math.PI * 2),
+    curveSign: Math.random() < .5 ? -1 : 1,
+    pursuitPhase: rand(0, Math.PI * 2),
     attackTimer: rand(0.2, 0.8),
     skillTimer: rand(2.4, 4.5),
     bossSkillIndex: 0,
@@ -1915,9 +2018,12 @@ function updateEnemies(dt) {
     } else if (playerDistance > attackDistance) {
       const pressureRelief = game.health / game.maxHealth < .28 ? .78 : 1;
       const stride = enemy.speed * slow * dash * rage * pressureRelief * dt;
-      const sideStep = Math.sin(game.elapsed * 2.2 + enemy.sway) * Math.min(8, stride * .35);
-      enemy.x += playerDx / playerDistance * stride + -playerDy / playerDistance * sideStep;
-      enemy.y += playerDy / playerDistance * stride + playerDx / playerDistance * sideStep;
+      enemy.pursuitPhase += dt * (enemy.type === "runner" ? 2.1 : 1.05);
+      const arcStrength = (enemy.type === "runner" ? .38 : .22) * (playerDistance > 135 ? 1 : playerDistance / 135);
+      const arc = (enemy.curveSign * .65 + Math.sin(enemy.pursuitPhase + enemy.sway) * .35) * arcStrength;
+      const forward = Math.sqrt(Math.max(.68, 1 - arc * arc));
+      enemy.x += (playerDx / playerDistance * forward + -playerDy / playerDistance * arc) * stride;
+      enemy.y += (playerDy / playerDistance * forward + playerDx / playerDistance * arc) * stride;
     } else {
       enemy.attackTimer -= dt;
       if (enemy.attackTimer <= 0) {
@@ -1991,7 +2097,9 @@ function updateBossWarnings(dt) {
       makeDirectionalParticles(warning.x, warning.y, warning.color, 42, 290, -Math.PI / 2, Math.PI, warning.particleShape);
       if (Math.hypot(game.player.x - warning.x, game.player.y - warning.y) <= warning.radius + 13) damagePlayer(warning.damage, warning.x, warning.y, true);
       game.shake = Math.max(game.shake, 19);
+      game.bossShock = .78;
       game.flash = Math.max(game.flash, .32);
+      if (navigator.vibrate) navigator.vibrate([55, 25, 95]);
       tone(62, .2, "sawtooth", .06, .38);
     } else warning.life -= dt;
   }
@@ -2121,10 +2229,10 @@ function killEnemy(enemy) {
     game.health = Math.min(game.maxHealth, game.health + lotusHeal);
     if (enemy.type === "boss") addFloater(game.player.x, game.player.y - 47, `金莲 +${lotusHeal}`, "#ffe79a", 10);
   }
-  if (game.health < game.maxHealth * .24 && Math.random() < .18) {
-    const recovery = Math.max(2, Math.round(game.maxHealth * .035));
-    game.health = Math.min(game.maxHealth, game.health + recovery);
-    addFloater(game.player.x, game.player.y - 40, `+${recovery}`, "#72ffad", 11);
+  const medkitChance = .2 + (game.player.companionPet?.medkitBonus || 0);
+  if (game.medkits.length < EFFECT_LIMITS.medkits && (enemy.type === "boss" || Math.random() < medkitChance)) {
+    game.medkits.push({ x: enemy.x + rand(-9,9), y: enemy.y + rand(-7,7), age: 0, pulse: rand(0, Math.PI * 2), collected: false });
+    addFloater(enemy.x, enemy.y - enemy.size - 4, "急救血包", "#7dffac", 9);
   }
   if (game.corpses.length >= EFFECT_LIMITS.corpses) game.corpses.shift();
   game.corpses.push({
@@ -2166,7 +2274,14 @@ function killEnemy(enemy) {
     if (game.scene.endless) {
       game.banner = { text: "宗主败退", sub: "更高阶的修士正在踏入战场", time: 2.6 };
       game.bossSpawned = false;
-    } else setTimeout(() => finishGame(true), 650);
+    } else {
+      game.missionBossDefeated = true;
+      if (game.kills >= game.missionTarget) { game.missionCompleteQueued = true; setTimeout(() => finishGame(true), 650); }
+      else game.banner = { text: "首领已击败", sub: `继续完成任务：还需击杀 ${game.missionTarget - game.kills} 名敌人`, time: 3.1 };
+    }
+  } else if (!game.scene.endless && game.missionBossDefeated && !game.missionCompleteQueued && game.kills >= game.missionTarget) {
+    game.missionCompleteQueued = true;
+    setTimeout(() => finishGame(true), 450);
   } else if (game.combo % 15 === 0) {
     tone(420 + Math.min(game.combo, 60) * 3, 0.06, "triangle", 0.022, 1.3);
   }
@@ -2312,12 +2427,10 @@ function gainXp(amount) {
     levelsGained += 1;
   }
   if (levelsGained > 0) {
-    const recovered = Math.max(0, Math.ceil(game.maxHealth - game.health));
-    game.health = game.maxHealth;
     game.pulseTimer = 0;
     game.flash = Math.max(game.flash, .34);
-    addFloater(player.x, player.y - 62, `突破 LV.${player.level} · 生命回满`, "#e5fff2", 14);
-    addFloater(player.x, player.y - 39, `+${recovered} 生命 · 大招立即就绪`, "#72ffb8", 11);
+    addFloater(player.x, player.y - 62, `突破 LV.${player.level}`, "#e5fff2", 14);
+    addFloater(player.x, player.y - 39, "大招立即就绪 · 寻找血包恢复生命", "#72ffb8", 10);
     game.shockwaves.push({ x: player.x, y: player.y, radius: 8, maxRadius: 88, life: .72, color: "#78ffd0" });
     game.shockwaves.push({ x: player.x, y: player.y, radius: 18, maxRadius: 54, life: .48, color: "#ffffff" });
     makeDirectionalParticles(player.x, player.y + 18, "#72ffb8", 24, 155, -Math.PI / 2, 1.15, "spark");
@@ -2517,7 +2630,7 @@ function syncHud() {
   if (!game) return;
   const player = game.player;
   const remaining = game.scene.endless ? game.elapsed : Math.max(0, TOTAL_WAVES * game.waveSeconds - game.elapsed);
-  ui.mission.textContent = `${game.scene.shortName} ${String(game.missionLevel).padStart(2, "0")} · 当前波次`;
+  ui.mission.textContent = game.scene.endless ? `${game.scene.shortName} · 击杀 ${game.kills}` : `${game.scene.shortName} ${String(game.missionLevel).padStart(2, "0")} · 击杀 ${Math.min(game.kills, game.missionTarget)}/${game.missionTarget}`;
   ui.defenseLabel.textContent = "角色生命";
   ui.wave.textContent = game.scene.endless ? `${game.wave} / ∞` : `${game.wave} / ${TOTAL_WAVES}`;
   ui.timer.textContent = formatTime(remaining);
@@ -2663,6 +2776,20 @@ function renderDivineGearCard() {
   }
 }
 
+function renderPetRoster() {
+  if (!ui.petRoster) return;
+  ui.petRoster.innerHTML = petDefinitions.map((pet) => `<button class="pet-card${meta.pet.selected === pet.id ? " active" : ""}" data-pet="${pet.id}" style="--pet-color:${pet.color}"><i>${pet.icon}</i><b>${pet.name}</b><small>${pet.detail}</small></button>`).join("");
+  for (const button of ui.petRoster.querySelectorAll(".pet-card")) {
+    button.addEventListener("click", () => {
+      meta.pet.selected = button.dataset.pet;
+      saveMeta();
+      renderPetRoster();
+      showToast(`${getSelectedPet().name}已设为随行宠物`);
+      tone(610, .1, "triangle", .025, 1.4);
+    });
+  }
+}
+
 function renderArmory() {
   refreshDailyAds();
   const classId = selectedRunClass;
@@ -2670,6 +2797,7 @@ function renderArmory() {
   const bonuses = getEquippedBonuses(classId);
   const resonance = getGearResonance(classId);
   renderDivineGearCard();
+  renderPetRoster();
   ui.gearPowerText.textContent = getCombatPower(classId);
   const bonusLabels = formatBonusSummary(bonuses);
   if (resonance.legendary > 0) bonusLabels.push(`红装共鸣 ${resonance.legendary}/6 · 伤害 +${Math.round(resonance.damage * 100)}%`);
@@ -3073,7 +3201,8 @@ function renderSceneMap() {
   ui.start.disabled = !isLevelUnlocked(selectedSceneIndex, selectedLevel);
   ui.startText.textContent = unlocked ? (scene.endless ? "踏入太虚仙域" : `开始 ${String(selectedSceneIndex + 1).padStart(2, "0")}-${String(selectedLevel).padStart(2, "0")}`) : "章节尚未解锁";
   const energyCost = getRunEnergyCost("main");
-  ui.startHint.textContent = unlocked ? (scene.endless ? `消耗 ${energyCost} 体力 · 三条命 · 无尽挑战` : `消耗 ${energyCost} 体力 · ${modifier.name} · 约 ${Math.ceil((11.5 + Math.min(2.5, selectedLevel * 0.22)) * TOTAL_WAVES / 10) * 10} 秒`) : getSceneLockedMessage(selectedSceneIndex);
+  const missionTarget = 26 + selectedSceneIndex * 6 + selectedLevel * 3;
+  ui.startHint.textContent = unlocked ? (scene.endless ? `消耗 ${energyCost} 体力 · 三条命 · 无尽挑战` : `消耗 ${energyCost} 体力 · 任务击杀 ${missionTarget} · ${modifier.name}`) : getSceneLockedMessage(selectedSceneIndex);
 }
 
 function selectScene(index) {
@@ -3156,6 +3285,7 @@ function render() {
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
+    drawBossScreenShock();
     drawMovementGuide();
     drawBanner();
     drawDivineAwakeningOverlay();
@@ -3166,6 +3296,22 @@ function render() {
   } else {
     drawHomeSilhouettes();
   }
+}
+
+function drawBossScreenShock() {
+  if (!game.bossShock) return;
+  const strength = Math.min(1, game.bossShock / .78);
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = colorAlpha(game.scene.colors.hit, .5 * strength);
+  ctx.lineWidth = 5 * strength;
+  for (let i = 0; i < 3; i += 1) {
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, (1 - strength) * 230 + 38 + i * 34, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = .15 * strength;
+  ctx.fillStyle = game.scene.colors.hit;
+  for (let y = 0; y < H; y += 18) ctx.fillRect((y % 36 ? -1 : 1) * strength * 10, y, W, 3);
+  ctx.restore();
 }
 
 function drawBattleAtmosphere() {
@@ -3228,7 +3374,7 @@ function drawDivineAwakeningOverlay() {
 
 function drawMovementGuide() {
   if (!pointerMove.active || paused) return;
-  const distance = Math.hypot(pointerMove.x - W / 2, pointerMove.y - H / 2);
+  const distance = Math.hypot(pointerMove.x - (pointerMove.touchMode ? pointerMove.originX : W / 2), pointerMove.y - (pointerMove.touchMode ? pointerMove.originY : H / 2));
   if (distance < 24) return;
   ctx.save(); ctx.translate(pointerMove.x, pointerMove.y);
   ctx.strokeStyle = colorAlpha(game.player.combatClass.color, .55); ctx.lineWidth = 1.5;
@@ -3432,6 +3578,7 @@ function drawBattlefield() {
   for (const mark of game.groundMarks) drawGroundMark(mark);
   for (const corpse of game.corpses) drawCorpse(corpse);
   for (const drop of game.xpDrops) drawXpDrop(drop);
+  for (const kit of game.medkits) drawMedkit(kit);
   drawDivineDelivery();
   for (const warning of game.bossWarnings) drawBossWarning(warning);
   // Player and enemies share one Canvas2D actor layer. Sorting by their
@@ -3446,6 +3593,7 @@ function drawBattlefield() {
     if (actor === game.player) drawBase();
     else drawEnemy(actor);
   }
+  drawCompanionPet();
   for (const projectile of game.enemyProjectiles) drawEnemyProjectile(projectile);
   for (const bullet of game.bullets) drawBullet(bullet);
   for (const burst of game.impactBursts) drawImpactBurst(burst);
@@ -3638,6 +3786,18 @@ function drawXpDrop(drop) {
     ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, -2); ctx.lineTo(4, 8); ctx.lineTo(-4, 8); ctx.lineTo(-7, -2); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.82)"; ctx.beginPath(); ctx.arc(-2, -3, 2, 0, Math.PI * 2); ctx.fill();
   }
+  ctx.restore();
+}
+
+function drawMedkit(kit) {
+  const bob = Math.sin(kit.pulse) * 3;
+  const glow = .72 + Math.sin(kit.pulse * 1.6) * .18;
+  ctx.save(); ctx.translate(kit.x, kit.y + bob);
+  ctx.shadowColor = "#70ff9f"; ctx.shadowBlur = 15;
+  ctx.fillStyle = `rgba(75,255,135,${.15 * glow})`; ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#eafff0"; rr(-11,-9,22,18,4); ctx.fill();
+  ctx.fillStyle = "#43dc78"; ctx.fillRect(-2.5,-7,5,14); ctx.fillRect(-8,-2.5,16,5);
+  ctx.strokeStyle = "rgba(93,255,145,.9)";ctx.lineWidth=2;rr(-11,-9,22,18,4);ctx.stroke();
   ctx.restore();
 }
 
@@ -5770,7 +5930,17 @@ ui.pauseExit.addEventListener("click", () => {
   returnHome();
   showToast("已退出本局，未结算战斗收益");
 });
-ui.pulse.addEventListener("click", activatePulse);
+let lastTouchPulseAt = 0;
+ui.pulse.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "mouse") return;
+  event.preventDefault();
+  event.stopPropagation();
+  lastTouchPulseAt = performance.now();
+  activatePulse();
+});
+ui.pulse.addEventListener("click", () => {
+  if (performance.now() - lastTouchPulseAt > 450) activatePulse();
+});
 ui.unequipAllGear.addEventListener("click", unequipAllGear);
 ui.mute.addEventListener("click", () => {
   setMuted(!muted);
@@ -5788,11 +5958,13 @@ function updatePointerMovement(event) {
   pointerMove.x = (event.clientX - rect.left) / rect.width * W;
   pointerMove.y = (event.clientY - rect.top) / rect.height * H;
   pointerMove.active = true;
-  const dx = pointerMove.x - W / 2;
-  const dy = pointerMove.y - H / 2;
+  const touch = event.pointerType !== "mouse";
+  pointerMove.touchMode = touch;
+  const dx = pointerMove.x - (touch ? pointerMove.originX : W / 2);
+  const dy = pointerMove.y - (touch ? pointerMove.originY : H / 2);
   const distance = Math.hypot(dx, dy);
-  const deadZone = 34;
-  const strength = Math.min(1, Math.max(0, (distance - deadZone) / 125));
+  const deadZone = touch ? 7 : 34;
+  const strength = Math.min(1, Math.max(0, (distance - deadZone) / (touch ? 52 : 125)));
   game.move.x = distance > deadZone ? dx / distance * strength : 0;
   game.move.y = distance > deadZone ? dy / distance * strength : 0;
 }
@@ -5800,6 +5972,12 @@ function updatePointerMovement(event) {
 window.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "mouse" || event.target.closest("button, .modal, .upgrade-card")) return;
   pointerMove.touchId = event.pointerId;
+  const rect = canvas.getBoundingClientRect();
+  pointerMove.originX = (event.clientX - rect.left) / rect.width * W;
+  pointerMove.originY = (event.clientY - rect.top) / rect.height * H;
+  pointerMove.x = pointerMove.originX;
+  pointerMove.y = pointerMove.originY;
+  canvas.setPointerCapture?.(event.pointerId);
   updatePointerMovement(event);
 });
 window.addEventListener("pointermove", updatePointerMovement);
@@ -5862,7 +6040,7 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 }
 
 renderHome();
-if (QA_MODE) {
+if (QA_MODE || ADMIN_MODE) {
   ui.login.classList.add("hidden");
   ui.home.classList.remove("hidden");
   switchHomePanel("command");

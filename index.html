@@ -16,7 +16,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" />
     <title>多元防线</title>
-    <link rel="stylesheet" href="./styles.css?v=41" />
+    <link rel="stylesheet" href="./styles.css?v=42" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -185,6 +185,10 @@
               <span><small>综合战力</small><b id="gearPowerText">100</b></span>
               <div id="gearBonusList" class="gear-bonus-list"></div>
             </div>
+            <div class="pet-hangar">
+              <div class="inventory-title"><span>随行宠物</span><small>每局自动出战 · 可随时切换</small></div>
+              <div id="petRoster" class="pet-roster"></div>
+            </div>
             <div class="wardrobe-preview">
               <canvas id="armoryAvatarPreview" width="320" height="176" aria-label="当前角色换装预览"></canvas>
               <div class="wardrobe-caption"><span><small>当前养成角色</small><b id="wardrobeHeroName">远战 · 追猎</b></span><span id="wardrobeGearSet">装备 0 / 6</span></div>
@@ -288,6 +292,6 @@
       </section>
     </main>
 
-    <script type="module" src="./game.js?v=41"></script>
+    <script type="module" src="./game.js?v=42"></script>
   </body>
 </html>
