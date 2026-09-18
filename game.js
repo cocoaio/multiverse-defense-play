@@ -6246,7 +6246,7 @@ if (QA_MODE) {
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("./service-worker.js?v=44", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("./service-worker.js?v=45", { updateViaCache: "none" });
       await registration.update();
       registration.waiting?.postMessage("SKIP_WAITING");
     } catch (error) {

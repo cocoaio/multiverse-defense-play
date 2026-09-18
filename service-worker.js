@@ -1,9 +1,9 @@
-const CACHE_NAME = "multiverse-defense-v44";
+const CACHE_NAME = "multiverse-defense-v45";
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=44",
-  "./game.js?v=44",
+  "./styles.css?v=45",
+  "./game.js?v=45",
   "./manifest.webmanifest",
   "./icon.svg",
   "./assets/companions-v1.png",
