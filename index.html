@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#09130f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="多元防线：跨越城市、雪原、医院与星球的竖屏 Roguelike 割草游戏。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="多元防线 · 微信即点即玩" />
+    <meta property="og:description" content="跨越沦陷都市、极地雪原与太虚仙域，立即开始竖屏割草战斗。" />
+    <meta property="og:url" content="https://multiverse-defense-play.fullunull.chatgpt.site/" />
+    <meta property="og:image" content="https://multiverse-defense-play.fullunull.chatgpt.site/assets/posters/original/city-heroes-v1.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" />
+    <title>多元防线</title>
+    <link rel="stylesheet" href="./styles.css?v=39" />
+  </head>
+  <body>
+    <main id="app" data-scene="city" aria-label="多元防线游戏">
+      <canvas id="game" width="390" height="844" aria-label="游戏画面"></canvas>
+
+      <section id="loginScreen" class="screen login-screen" aria-label="登录多元防线">
+        <div class="login-art" aria-hidden="true">
+          <span class="login-orbit orbit-a"></span>
+          <span class="login-orbit orbit-b"></span>
+          <span class="login-core">界</span>
+        </div>
+        <div class="login-copy">
+          <p>SEVEN WORLDS · ONE DEFENSE</p>
+          <h1>多元防线</h1>
+          <span>穿越七个世界，培养属于你的战斗流派</span>
+        </div>
+        <div class="login-panel">
+          <div class="login-panel-title"><span>账号登录</span><small>接口预留 · 当前为原型体验</small></div>
+          <div class="login-methods">
+            <button data-login-provider="微信"><i class="wechat-mark">微</i><span>微信登录</span><em>待接入</em></button>
+            <button data-login-provider="抖音"><i class="douyin-mark">抖</i><span>抖音登录</span><em>待接入</em></button>
+            <button data-login-provider="邮箱"><i>邮</i><span>邮箱登录</span><em>待接入</em></button>
+            <button data-login-provider="手机号"><i>手</i><span>手机号登录</span><em>待接入</em></button>
+          </div>
+          <button id="guestLoginButton" class="guest-login">游客进入基地 <span>→</span></button>
+          <p class="login-legal">进入游戏即代表同意《用户协议》与《隐私政策》</p>
+        </div>
+      </section>
+
+      <section id="hud" class="hud hidden" aria-live="polite">
+        <div class="hud-top">
+          <div class="wave-block">
+            <span id="missionText" class="eyebrow">都市 01 · 当前波次</span>
+            <strong id="waveText">1 / 6</strong>
+          </div>
+          <div class="timer-block">
+            <span class="eyebrow">本轮结束</span>
+            <strong id="timerText">02:30</strong>
+          </div>
+          <div class="coin-block">
+            <span class="coin-dot">◆</span>
+            <strong id="runCoinText">0</strong>
+          </div>
+        </div>
+
+        <div class="bars">
+          <div class="bar-row">
+            <span id="defenseLabel">城墙</span>
+            <div class="bar health"><i id="healthFill"></i></div>
+            <b id="healthText">100/100</b>
+          </div>
+          <div class="bar-row xp-row">
+            <span id="levelText">LV.1</span>
+            <div class="bar xp"><i id="xpFill"></i></div>
+            <b id="xpText">0/30</b>
+          </div>
+        </div>
+
+        <div id="combo" class="combo hidden"><strong id="comboText">12</strong><span>连斩</span></div>
+        <div id="bossHud" class="boss-hud hidden">
+          <span id="bossName">变异暴君</span>
+          <div class="boss-bar"><i id="bossFill"></i></div>
+        </div>
+        <div id="livesText" class="lives-text hidden">命数 ♥♥♥</div>
+
+        <button id="pauseButton" class="icon-button pause-button" aria-label="暂停游戏">Ⅱ</button>
+        <button id="muteButton" class="icon-button mute-button" aria-label="关闭音效">⌁</button>
+
+        <button id="pulseButton" class="pulse-button" aria-label="释放大招，键盘可按空格键">
+          <span class="pulse-icon">ϟ</span>
+          <span class="pulse-copy"><b id="pulseName">电磁脉冲</b><small id="pulseHint">点击 / SPACE</small></span>
+          <i id="pulseCooldown"></i>
+        </button>
+        <div class="movement-hint" aria-hidden="true"><i>⌖</i><span>鼠标指向移动<br>触屏按住指向</span></div>
+      </section>
+
+      <section id="homeScreen" class="screen home-screen hidden">
+        <div class="home-glow"></div>
+        <header class="home-header">
+          <div class="commander-profile">
+            <div class="profile-copy">
+              <span><i id="adminBadge" class="admin-badge hidden">ADMIN</i><em id="commanderRoleText">游客指挥官</em> · <b id="accountLevelText">LV.1</b></span>
+              <strong id="accountTitleText">新晋守卫者</strong>
+              <div class="account-xp"><i id="accountProgressFill"></i></div>
+            </div>
+          </div>
+          <div class="home-actions">
+            <button id="energyButton" class="energy-pill" aria-label="体力不足时观看广告恢复"><span>⚡</span><b id="energyText">8/8</b><i>＋</i></button>
+            <button id="coinStoreButton" class="bank-pill" aria-label="打开补给币商店"><span>◆</span><b id="bankCoinText">0</b><i>＋</i></button>
+          </div>
+        </header>
+
+        <div class="record-strip">
+          <div><span>攻略进度</span><b><i id="clearedLevelText">0</i><small>/72</small></b></div>
+          <div><span>战术等级</span><b id="winsText">1</b></div>
+          <div><span>已探索世界</span><b id="unlockedSceneText">7/7</b></div>
+        </div>
+
+        <nav class="home-tabs" aria-label="基地导航">
+          <button id="commandTab" class="home-tab active">指挥中心</button>
+          <button id="worldTab" class="home-tab">作战地图</button>
+          <button id="baseTab" class="home-tab">基地强化</button>
+          <button id="armoryTab" class="home-tab">军械库</button>
+        </nav>
+
+        <div id="commandPanel" class="command-panel">
+          <article id="lobbyStage" class="lobby-stage">
+            <div class="lobby-atmosphere" aria-hidden="true"></div>
+            <div class="lobby-mission">
+              <small id="lobbyChapterText">第一章 · 沦陷都市</small>
+              <strong id="lobbyMissionText">待命：前沿侦察</strong>
+              <span id="lobbyProgressText">区域攻略 0 / 12</span>
+            </div>
+            <div id="lobbyHero" class="lobby-hero" aria-label="当前主题角色展示"></div>
+            <div class="lobby-loadout">
+              <span id="lobbyClassName">街区神射手</span>
+              <small id="lobbyPowerText">战力 100</small>
+            </div>
+            <button id="openMapButton" class="map-entry-button"><i>⌖</i><span><b>选择关卡</b><small>进入作战地图</small></span><em>›</em></button>
+          </article>
+          <div class="briefing-grid">
+            <button id="quickArmoryButton"><i>▦</i><span><b>装备方案</b><small id="equippedCountText">0 / 6 已装备</small></span></button>
+            <button id="nextObjectiveButton"><i>✦</i><span><b>今日目标</b><small>完成 2 场战斗</small></span></button>
+          </div>
+          <aside class="command-sidebar" aria-label="指挥中心快捷入口">
+            <button data-retention-panel="daily"><i>✓</i><span>每日任务</span><em id="dailyRailBadge">0/4</em></button>
+            <button data-retention-panel="events"><i>◆</i><span>限时活动</span><em id="eventRailBadge">可领取</em></button>
+            <button data-retention-panel="dungeon"><i>⌁</i><span>丰饶之境</span><em id="dungeonRailBadge">3/3</em></button>
+            <button data-retention-panel="skins"><i>✦</i><span>商城</span><em id="skinRailBadge">新品</em></button>
+          </aside>
+        </div>
+
+        <div id="worldPanel" class="world-panel hidden">
+          <article id="sceneCard" class="scene-card">
+            <button id="previousScene" class="scene-arrow" aria-label="上一个场景">‹</button>
+            <div class="scene-copy">
+              <div class="scene-label"><span id="chapterText">第一章</span><i id="sceneStatus">作战中</i></div>
+              <h2 id="sceneName">沦陷都市</h2>
+              <p id="sceneDescription">夺回被感染者占领的城市街区</p>
+              <div class="scene-progress"><i id="sceneProgressFill"></i><span id="sceneProgressText">0 / 12</span></div>
+            </div>
+            <div id="sceneHero" class="scene-hero" aria-hidden="true"></div>
+            <button id="nextScene" class="scene-arrow" aria-label="下一个场景">›</button>
+          </article>
+
+          <div class="level-heading">
+            <span>区域推进</span>
+            <small id="levelModifier">01 · 前沿侦察</small>
+          </div>
+          <div id="levelGrid" class="level-grid" aria-label="关卡选择"></div>
+        </div>
+
+        <div id="basePanel" class="meta-panel hidden">
+          <div class="section-title"><span>永久强化</span><small>通用科技树 · 三角色共享</small></div>
+          <div id="metaUpgrades" class="meta-upgrades"></div>
+        </div>
+
+        <div id="armoryPanel" class="armory-panel hidden">
+          <div class="armory-summary">
+            <div><small>三角色独立养成</small><b>职业装备库</b></div>
+            <span class="armory-summary-note">掉落绑定职业 · 装备可强化至 +10</span>
+          </div>
+          <div id="gearCollection" class="gear-collection">
+            <div id="divineGearCard" class="divine-gear-card"></div>
+            <div id="gearPowerSummary" class="gear-power-summary">
+              <span><small>综合战力</small><b id="gearPowerText">100</b></span>
+              <div id="gearBonusList" class="gear-bonus-list"></div>
+            </div>
+            <div class="wardrobe-preview">
+              <canvas id="armoryAvatarPreview" width="320" height="176" aria-label="当前角色换装预览"></canvas>
+              <div class="wardrobe-caption"><span><small>当前养成角色</small><b id="wardrobeHeroName">远战 · 追猎</b></span><span id="wardrobeGearSet">装备 0 / 6</span></div>
+              <div id="wardrobeClassSwitch" class="wardrobe-class-switch" aria-label="预览职业"></div>
+            </div>
+            <div id="equippedGear" class="equipped-gear"></div>
+            <div class="inventory-title"><span>当前职业战利品</span><span><button id="unequipAllGear" class="unequip-all">全部卸下</button><small id="inventoryCount">0 / 60</small></span></div>
+            <div id="gearInventory" class="gear-inventory"></div>
+          </div>
+        </div>
+
+        <button id="startButton" class="primary-button">
+          <span id="startButtonText">开始 01-01</span>
+          <small id="startButtonHint">前沿侦察 · 约 90 秒</small>
+        </button>
+      </section>
+
+      <section id="upgradeScreen" class="screen upgrade-screen hidden" role="dialog" aria-modal="true" aria-labelledby="upgradeTitle">
+        <div class="upgrade-heading">
+          <div class="level-burst">升级</div>
+          <p>战场补给已送达</p>
+          <h2 id="upgradeTitle">选择一项强化</h2>
+        </div>
+        <div id="upgradeChoices" class="upgrade-choices"></div>
+      </section>
+
+      <section id="resultScreen" class="screen result-screen hidden" role="dialog" aria-modal="true">
+        <div id="resultBadge" class="result-badge">任务完成</div>
+        <h2 id="resultTitle">防线守住了</h2>
+        <p id="resultSubtitle">黎明已经到来</p>
+        <div class="result-stats">
+          <div><span>坚持时间</span><b id="resultTime">00:00</b></div>
+          <div><span>消灭僵尸</span><b id="resultKills">0</b></div>
+          <div><span>获得补给币</span><b id="resultCoins">0</b></div>
+          <div><span>最终等级</span><b id="resultLevel">1</b></div>
+        </div>
+        <div id="resultLoot" class="result-loot hidden"></div>
+        <button id="retryButton" class="primary-button"><span id="resultActionText">再次挑战</span></button>
+        <button id="homeButton" class="text-button">返回基地</button>
+      </section>
+
+      <div id="pauseOverlay" class="pause-overlay hidden">
+        <div class="pause-card">
+          <small>MISSION PAUSED</small>
+          <strong>战斗暂停</strong>
+          <span>本局进度尚未结算</span>
+          <button id="pauseResumeButton" class="pause-resume">继续战斗</button>
+          <button id="pauseExitButton" class="pause-exit">退出本局 · 返回基地</button>
+        </div>
+      </div>
+      <div id="toast" class="toast hidden" role="status"></div>
+
+      <section id="loadoutModal" class="modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="loadoutTitle">
+        <div class="modal-card loadout-card">
+          <button class="modal-close" data-close-loadout aria-label="关闭">×</button>
+          <p class="modal-kicker">RUN BUILD</p>
+          <h2 id="loadoutTitle">选择本局战斗流派</h2>
+          <p class="loadout-hint">职业决定攻击方式与升级路线；装备掉落和装配绑定当前角色。</p>
+          <div id="classChoices" class="class-choices"></div>
+        </div>
+      </section>
+
+      <section id="coinStoreModal" class="modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="coinStoreTitle">
+        <div class="modal-card">
+          <button class="modal-close" data-close-modal aria-label="关闭">×</button>
+          <p class="modal-kicker">SUPPLY DEPOT</p>
+          <h2 id="coinStoreTitle">补给币商店</h2>
+          <div class="prototype-notice">原型测试通道 · 不会产生真实扣款</div>
+          <div id="coinPacks" class="coin-packs"></div>
+          <button id="freeCoinAdButton" class="reward-ad-button"><span>▶</span><b>观看演示广告</b><small>获得 80 补给币 · 每日 3 次</small></button>
+        </div>
+      </section>
+
+      <section id="retentionModal" class="modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="retentionTitle">
+        <div class="modal-card retention-card">
+          <button class="modal-close" data-close-retention aria-label="关闭">×</button>
+          <p id="retentionKicker" class="modal-kicker">DAILY OPERATIONS</p>
+          <h2 id="retentionTitle">每日任务</h2>
+          <div id="retentionContent" class="retention-content"></div>
+        </div>
+      </section>
+
+      <section id="adModal" class="modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="adTitle">
+        <div class="modal-card ad-card">
+          <p class="modal-kicker">REWARDED AD DEMO</p>
+          <h2 id="adTitle">演示广告</h2>
+          <div class="ad-visual"><span>✦</span><b>星际补给站</b><small>此处将由正式广告 SDK 提供内容</small></div>
+          <div id="adCountdown" class="ad-countdown">3 秒后可领取奖励</div>
+          <button id="claimAdReward" class="primary-button" disabled><span>等待广告结束</span></button>
+        </div>
+      </section>
+
+      <section id="reviveModal" class="modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="reviveTitle">
+        <div class="modal-card revive-card">
+          <p id="reviveKicker" class="modal-kicker">FATE INTERRUPTED</p>
+          <h2 id="reviveTitle">三道命数已尽</h2>
+          <p id="reviveDescription">观看一次演示广告，可重塑一道命数并继续本次修行。</p>
+          <button id="reviveAdButton" class="primary-button"><span>▶ 看广告复活</span></button>
+          <button id="endEndlessButton" class="text-button">结束本次修行</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./game.js?v=39"></script>
+  </body>
+</html>
