@@ -1,30 +1,42 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const heroAtlas = new Image();
-heroAtlas.src = "./assets/posters/original/hero-archetypes-v1.webp";
-const enemyAtlas = new Image();
-enemyAtlas.src = "./assets/enemy-worlds-v1.webp";
-const cultivatorHeroAtlas = new Image();
-cultivatorHeroAtlas.src = "./assets/posters/original/cultivator-heroes-v1.webp";
-const cultivatorEnemyAtlas = new Image();
-cultivatorEnemyAtlas.src = "./assets/cultivator-enemies-v2.webp";
-const hospitalHeroAtlas = new Image();
-hospitalHeroAtlas.src = "./assets/posters/original/hospital-heroes-v1.webp";
-const hospitalBattlefield = new Image();
-hospitalBattlefield.src = "./assets/hospital-battlefield-v1.webp";
-const cityBattlefield = new Image(); cityBattlefield.src = "./assets/city-battlefield-v1.webp";
-const snowBattlefield = new Image(); snowBattlefield.src = "./assets/snow-battlefield-v1.webp";
-const orbitBattlefield = new Image(); orbitBattlefield.src = "./assets/orbit-battlefield-v1.webp";
-const marsBattlefield = new Image(); marsBattlefield.src = "./assets/mars-battlefield-v1.webp";
-const moonBattlefield = new Image(); moonBattlefield.src = "./assets/moon-battlefield-v1.webp";
-const cultivationBattlefield = new Image(); cultivationBattlefield.src = "./assets/cultivation-battlefield-v1.webp";
-const cityHeroAtlas = new Image(); cityHeroAtlas.src = "./assets/posters/original/city-heroes-v1.webp";
-const snowHeroAtlas = new Image(); snowHeroAtlas.src = "./assets/posters/original/snow-heroes-v1.webp";
-const orbitShipAtlas = new Image(); orbitShipAtlas.src = "./assets/posters/original/orbit-ships-v1.webp";
-const marsHeroAtlas = new Image(); marsHeroAtlas.src = "./assets/posters/original/mars-heroes-v1.webp";
-const moonHeroAtlas = new Image(); moonHeroAtlas.src = "./assets/posters/original/moon-heroes-v1.webp";
+function createAssetImage(src, eager = false) {
+  const image = new Image();
+  image.decoding = "async";
+  image.dataset.src = src;
+  if (eager) image.src = src;
+  return image;
+}
+
+function ensureImageLoaded(image) {
+  if (image && !image.src) image.src = image.dataset.src;
+  return image;
+}
+
+const heroAtlas = createAssetImage("./assets/posters/original/hero-archetypes-v1.webp");
+const enemyAtlas = createAssetImage("./assets/enemy-worlds-v1.webp", true);
+const cultivatorHeroAtlas = createAssetImage("./assets/posters/original/cultivator-heroes-v1.webp");
+const cultivatorEnemyAtlas = createAssetImage("./assets/cultivator-enemies-v2.webp");
+const hospitalHeroAtlas = createAssetImage("./assets/posters/original/hospital-heroes-v1.webp");
+const hospitalBattlefield = createAssetImage("./assets/hospital-battlefield-v1.webp");
+const cityBattlefield = createAssetImage("./assets/city-battlefield-v1.webp", true);
+const snowBattlefield = createAssetImage("./assets/snow-battlefield-v1.webp");
+const orbitBattlefield = createAssetImage("./assets/orbit-battlefield-v1.webp");
+const marsBattlefield = createAssetImage("./assets/mars-battlefield-v1.webp");
+const moonBattlefield = createAssetImage("./assets/moon-battlefield-v1.webp");
+const cultivationBattlefield = createAssetImage("./assets/cultivation-battlefield-v1.webp");
+const cityHeroAtlas = createAssetImage("./assets/posters/original/city-heroes-v1.webp", true);
+const snowHeroAtlas = createAssetImage("./assets/posters/original/snow-heroes-v1.webp");
+const orbitShipAtlas = createAssetImage("./assets/posters/original/orbit-ships-v1.webp");
+const marsHeroAtlas = createAssetImage("./assets/posters/original/mars-heroes-v1.webp");
+const moonHeroAtlas = createAssetImage("./assets/posters/original/moon-heroes-v1.webp");
 const battlefieldTextures = { city: cityBattlefield, snow: snowBattlefield, hospital: hospitalBattlefield, orbit: orbitBattlefield, mars: marsBattlefield, moon: moonBattlefield, cultivation: cultivationBattlefield };
 const sceneHeroAtlases = { city: cityHeroAtlas, snow: snowHeroAtlas, hospital: hospitalHeroAtlas, orbit: orbitShipAtlas, mars: marsHeroAtlas, moon: moonHeroAtlas, cultivation: cultivatorHeroAtlas };
+function ensureSceneAssets(sceneId) {
+  ensureImageLoaded(battlefieldTextures[sceneId]);
+  ensureImageLoaded(sceneHeroAtlases[sceneId]);
+  ensureImageLoaded(sceneId === "cultivation" ? cultivatorEnemyAtlas : enemyAtlas);
+}
 const W = 390;
 const H = 844;
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -2988,6 +3000,7 @@ function openAdDemo(reward, usesDailyLimit = true, presentation = {}) {
 
 function renderHome() {
   refreshDailyState();
+  ensureSceneAssets(scenes[selectedSceneIndex].id);
   ui.adminBadge?.classList.toggle("hidden", !ADMIN_MODE);
   if (ui.commanderRole) ui.commanderRole.textContent = ADMIN_MODE ? "网页管理员" : "游客指挥官";
   if (ui.energyText) ui.energyText.textContent = `${meta.energy.current}/${meta.energy.max}`;
@@ -3018,6 +3031,7 @@ function renderCommandCenter() {
 
 function renderSceneMap() {
   const scene = scenes[selectedSceneIndex];
+  ensureSceneAssets(scene.id);
   const cleared = meta.progress[scene.id];
   const unlocked = isSceneUnlocked(selectedSceneIndex);
   const modifier = getLevelModifier(selectedLevel);

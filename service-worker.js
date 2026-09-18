@@ -1,12 +1,7 @@
-const CACHE_NAME = "multiverse-defense-v39";
+const CACHE_NAME = "multiverse-defense-v40";
 const ASSETS = [
-  "./", "./index.html", "./styles.css?v=39", "./game.js?v=39", "./manifest.webmanifest", "./icon.svg",
-  "./assets/city-battlefield-v1.webp", "./assets/snow-battlefield-v1.webp", "./assets/hospital-battlefield-v1.webp",
-  "./assets/orbit-battlefield-v1.webp", "./assets/mars-battlefield-v1.webp", "./assets/moon-battlefield-v1.webp", "./assets/cultivation-battlefield-v1.webp",
-  "./assets/posters/original/hero-archetypes-v1.webp", "./assets/posters/original/city-heroes-v1.webp", "./assets/posters/original/snow-heroes-v1.webp",
-  "./assets/posters/original/hospital-heroes-v1.webp", "./assets/posters/original/orbit-ships-v1.webp", "./assets/posters/original/mars-heroes-v1.webp",
-  "./assets/posters/original/moon-heroes-v1.webp", "./assets/posters/original/cultivator-heroes-v1.webp",
-  "./assets/enemy-worlds-v1.webp", "./assets/cultivator-enemies-v2.webp",
+  "./", "./index.html", "./styles.css?v=40", "./game.js?v=40", "./manifest.webmanifest", "./icon.svg",
+  "./assets/city-battlefield-v1.webp", "./assets/posters/original/city-heroes-v1.webp", "./assets/enemy-worlds-v1.webp",
 ];
 
 self.addEventListener("install", (event) => {
