@@ -3,6 +3,9 @@ const ctx = canvas.getContext("2d");
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+const MOBILE_DEVICE = document.documentElement.classList.contains("mobile-device")
+  || navigator.maxTouchPoints > 1
+  || matchMedia("(pointer: coarse)").matches;
 const COMPAT_ASSET_MODE = LOW_POWER_DEVICE || location.protocol === "file:";
 function createAssetImage(src, eager = false, fallbackSrc = "") {
   const image = new Image();
@@ -173,7 +176,7 @@ async function preloadAllGameAssets() {
     bytes.textContent = `${(loaded / 1048576).toFixed(2)} / ${(total / 1048576).toFixed(2)} MB`;
     if (name) label.textContent = `正在载入 ${name}`;
   };
-  profile.textContent = LOW_POWER_DEVICE ? "低配流畅档 · 1× 渲染" : "标准画质 · 1.5× 渲染";
+  profile.textContent = LOW_POWER_DEVICE ? "手机省电档 · 30 FPS" : MOBILE_DEVICE ? "手机流畅档 · 60 FPS" : "标准画质 · 60 FPS";
   render("在线素材清单");
 
   async function loadOne(entry) {
@@ -255,7 +258,7 @@ async function prepareSceneAssets(sceneId) {
 }
 const W = 390;
 const H = 844;
-const DPR = Math.min(window.devicePixelRatio || 1, LOW_POWER_DEVICE ? 1 : 1.5);
+const DPR = Math.min(window.devicePixelRatio || 1, MOBILE_DEVICE ? 1 : LOW_POWER_DEVICE ? 1 : 1.5);
 canvas.width = W * DPR;
 canvas.height = H * DPR;
 ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -409,9 +412,16 @@ const QA_MODE = new URLSearchParams(location.search).get("qa") === "internal";
 const ADMIN_MODE = new URLSearchParams(location.search).get("admin") === "owner";
 const STORAGE_KEY = ADMIN_MODE ? "multiverse-defense-admin-v1" : "multiverse-defense-save-v5";
 const BASE_Y = 752;
+const PERFORMANCE_PROFILE = LOW_POWER_DEVICE
+  ? { name: "省电", qualityCeiling: .56, qualityFloor: .38, enemyCap: 34, targetFps: 30, trailLength: 3 }
+  : MOBILE_DEVICE
+    ? { name: "流畅", qualityCeiling: .76, qualityFloor: .5, enemyCap: 44, targetFps: 60, trailLength: 6 }
+    : { name: "标准", qualityCeiling: 1, qualityFloor: .58, enemyCap: 84, targetFps: 60, trailLength: 14 };
 const EFFECT_LIMITS = LOW_POWER_DEVICE
-  ? { particles: 190, floaters: 38, bursts: 42, shockwaves: 34, corpses: 48, xpDrops: 90, medkits: 18, bullets: 130 }
-  : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
+  ? { particles: 96, floaters: 24, bursts: 22, shockwaves: 18, corpses: 22, xpDrops: 56, medkits: 12, bullets: 82 }
+  : MOBILE_DEVICE
+    ? { particles: 148, floaters: 32, bursts: 34, shockwaves: 26, corpses: 34, xpDrops: 76, medkits: 15, bullets: 112 }
+    : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
 const ENEMY_GRID_SIZE = 128;
 const enemyGridKey = (x, y) => (x + 32768) * 65536 + y + 32768;
 
@@ -707,6 +717,7 @@ let paused = false;
 let manuallyPaused = false;
 let muted = false;
 let lastFrame = performance.now();
+let nextFrameAt = lastFrame;
 let ambienceTime = 0;
 let nextId = 1;
 let toastTimer = 0;
@@ -1453,7 +1464,14 @@ function makeGame(runType = "main") {
     directorTimer: 0,
     spawnTimer: 0.45,
     shotTimer: 0.1,
-    performance: { quality: LOW_POWER_DEVICE ? .72 : 1, slowFrames: 0 },
+    performance: {
+      quality: PERFORMANCE_PROFILE.qualityCeiling,
+      qualityCeiling: PERFORMANCE_PROFILE.qualityCeiling,
+      qualityFloor: PERFORMANCE_PROFILE.qualityFloor,
+      targetFps: PERFORMANCE_PROFILE.targetFps,
+      slowFrames: 0,
+      frameMs: 1000 / PERFORMANCE_PROFILE.targetFps,
+    },
     pulseTimer: 0,
     pulseMax: Math.max(14, 22 * (1 - meta.upgrades.pulse * .035)),
     kills: 0,
@@ -1779,7 +1797,8 @@ function update(dt) {
   }
 
   game.spawnTimer -= dt;
-  if (game.spawnTimer <= 0 && game.enemies.length < (LOW_POWER_DEVICE ? 54 : 84)) {
+  const dynamicEnemyCap = Math.max(26, Math.round(PERFORMANCE_PROFILE.enemyCap * (.78 + game.performance.quality * .22)));
+  if (game.spawnTimer <= 0 && game.enemies.length < dynamicEnemyCap) {
     const reinforcementChance = 0.13 + (game.levelModifier.spawn - 1) * 1.6;
     const amount = game.wave >= 4 && Math.random() < reinforcementChance * game.director ? 2 : 1;
     for (let i = 0; i < amount; i += 1) spawnEnemy(pickEnemyType());
@@ -2373,7 +2392,9 @@ function queryNearbyEnemies(x, y, radius) {
 function findClosestLivingEnemy(x, y) {
   let closest = null;
   let closestDistance = Infinity;
-  for (const enemy of game.enemies) {
+  const nearby = queryNearbyEnemies(x, y, 320);
+  const candidates = nearby.length ? nearby : game.enemies;
+  for (const enemy of candidates) {
     if (enemy.dead) continue;
     const dx = enemy.x - x;
     const dy = enemy.y - y;
@@ -2397,10 +2418,11 @@ function updateBullets(dt) {
     }
     bullet.trail ||= [];
     bullet.trailTimer = (bullet.trailTimer || 0) - dt;
-    if (!bullet.contactAttack && bullet.fx !== "flyingSword" && bullet.trailTimer <= 0) {
+    if (!bullet.contactAttack && bullet.fx !== "flyingSword" && bullet.trailTimer <= 0 && game.performance.quality > .43) {
       bullet.trail.unshift({ x: bullet.x, y: bullet.y });
-      if (bullet.trail.length > (bullet.fx === "laser" || bullet.fx === "rail" ? 14 : 9)) bullet.trail.pop();
-      bullet.trailTimer = .026;
+      const trailLimit = Math.min(PERFORMANCE_PROFILE.trailLength, bullet.fx === "laser" || bullet.fx === "rail" ? 14 : 9);
+      if (bullet.trail.length > trailLimit) bullet.trail.pop();
+      bullet.trailTimer = MOBILE_DEVICE ? .045 : .026;
     }
     bullet.age = (bullet.age || 0) + dt;
     bullet.x += bullet.vx * dt;
@@ -2930,7 +2952,7 @@ function explode(x, y, directTarget) {
   game.shockwaves.push({ x, y, radius: 3, maxRadius: radius, life: 0.3, color: burstColor });
   makeDirectionalParticles(x, y, burstColor, 15, 190, impactAngle, 1.28, game.scene.id === "snow" ? "shard" : "spark");
   game.shake = Math.max(game.shake, 4);
-  for (const enemy of game.enemies) {
+  for (const enemy of queryNearbyEnemies(x, y, radius + 82)) {
     if (enemy.dead || enemy === directTarget) continue;
     const distance = Math.hypot(enemy.x - x, enemy.y - y);
     if (distance <= radius + enemy.size) damageEnemy(enemy, game.player.damage * 0.62, false, true);
@@ -4091,7 +4113,8 @@ function drawBattleAtmosphere() {
     ctx.strokeStyle = "rgba(150,255,229,.12)"; ctx.beginPath(); ctx.moveTo(0, scanY); ctx.lineTo(W, scanY); ctx.stroke();
   } else if (sceneId === "snow") {
     ctx.fillStyle = "rgba(236,251,255,.5)";
-    for (let i = 0; i < 20; i += 1) {
+    const snowflakes = game.performance.quality < .6 ? 8 : 20;
+    for (let i = 0; i < snowflakes; i += 1) {
       const x = (i * 61 + ambienceTime * (7 + i % 4)) % (W + 30) - 15;
       const y = (i * 97 + ambienceTime * (38 + i % 7)) % H;
       ctx.beginPath(); ctx.arc(x, y, 1 + i % 3 * .45, 0, Math.PI * 2); ctx.fill();
@@ -4177,7 +4200,8 @@ function drawBackground() {
   }
 
   ctx.save();
-  for (let i = 0; i < 32; i += 1) {
+  const ambientCount = game && game.performance.quality < .6 ? 10 : MOBILE_DEVICE ? 18 : 32;
+  for (let i = 0; i < ambientCount; i += 1) {
     const x = (i * 71.7 + Math.sin(i * 2.4) * 23) % W;
     const y = (i * 109 + ambienceTime * (scene.id === "snow" ? 18 + i % 7 : 4 + i % 4)) % H;
     ctx.fillStyle = colorAlpha(colors.grid, scene.id === "snow" ? 0.16 : 0.045 + (i % 3) * 0.015);
@@ -4332,8 +4356,9 @@ function drawBattlefield() {
   ctx.scale(zoom, zoom);
   ctx.translate(-game.player.x, -game.player.y);
   drawWorldDecor();
-  for (const scar of game.bossScars) drawBossScar(scar);
+  for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
   for (const wave of game.shockwaves) {
+    if (!isWorldPointVisible(wave.x, wave.y, wave.radius + 24)) continue;
     ctx.beginPath();
     ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
     ctx.strokeStyle = colorAlpha(wave.color, Math.min(0.8, wave.life * 1.6));
@@ -4341,17 +4366,18 @@ function drawBattlefield() {
     ctx.stroke();
   }
 
-  for (const mark of game.groundMarks) drawGroundMark(mark);
-  for (const corpse of game.corpses) drawCorpse(corpse);
-  for (const drop of game.xpDrops) drawXpDrop(drop);
-  for (const kit of game.medkits) drawMedkit(kit);
+  for (const mark of game.groundMarks) if (isWorldPointVisible(mark.x, mark.y, 28)) drawGroundMark(mark);
+  for (const corpse of game.corpses) if (isWorldPointVisible(corpse.x, corpse.y, corpse.size + 34)) drawCorpse(corpse);
+  for (const drop of game.xpDrops) if (isWorldPointVisible(drop.x, drop.y, 24)) drawXpDrop(drop);
+  for (const kit of game.medkits) if (isWorldPointVisible(kit.x, kit.y, 28)) drawMedkit(kit);
   drawDivineDelivery();
-  for (const warning of game.bossWarnings) drawBossWarning(warning);
+  for (const warning of game.bossWarnings) if (isWorldPointVisible(warning.x, warning.y, warning.radius + 24)) drawBossWarning(warning);
   // Player and enemies share one Canvas2D actor layer. Sorting by their
   // ground-contact point makes feet, shadows and bodies occlude naturally.
   const petPosition = game.player.companionPet ? getCompanionPetPosition() : null;
   const companionActor = petPosition ? { companion: true, ...petPosition } : null;
-  const actors = [...game.enemies, game.player, ...(companionActor ? [companionActor] : [])];
+  const visibleEnemies = game.enemies.filter((enemy) => isWorldPointVisible(enemy.x, enemy.y, enemy.size + 48));
+  const actors = [...visibleEnemies, game.player, ...(companionActor ? [companionActor] : [])];
   actors.sort((a, b) => {
     const aDepth = a === game.player ? a.y + 30 : a.companion ? a.y + 19 : a.y + a.size * .92;
     const bDepth = b === game.player ? b.y + 30 : b.companion ? b.y + 19 : b.y + b.size * .92;
@@ -4366,16 +4392,25 @@ function drawBattlefield() {
     else if (actor.companion) drawCompanionPet();
     else drawEnemy(actor);
   }
-  for (const projectile of game.enemyProjectiles) drawEnemyProjectile(projectile);
-  for (const bullet of game.bullets) drawBullet(bullet);
-  for (const burst of game.impactBursts) drawImpactBurst(burst);
-  for (const lightning of game.lightnings) drawLightning(lightning);
+  for (const projectile of game.enemyProjectiles) if (isWorldPointVisible(projectile.x, projectile.y, 36)) drawEnemyProjectile(projectile);
+  for (const bullet of game.bullets) if (isWorldPointVisible(bullet.x, bullet.y, 48)) drawBullet(bullet);
+  for (const burst of game.impactBursts) if (isWorldPointVisible(burst.x, burst.y, 54)) drawImpactBurst(burst);
+  for (const lightning of game.lightnings) if (isWorldPointVisible(lightning.x, lightning.y, 80)) drawLightning(lightning);
   drawUltimateEffect();
   const particleStep = game.performance?.quality < .65 ? 2 : 1;
-  for (let index = 0; index < game.particles.length; index += particleStep) drawCombatParticle(game.particles[index]);
+  for (let index = 0; index < game.particles.length; index += particleStep) {
+    const particle = game.particles[index];
+    if (isWorldPointVisible(particle.x, particle.y, 28)) drawCombatParticle(particle);
+  }
   ctx.globalAlpha = 1;
-  for (const floater of game.floaters) drawFloater(floater);
+  for (const floater of game.floaters) if (isWorldPointVisible(floater.x, floater.y, 40)) drawFloater(floater);
   ctx.restore();
+}
+
+function isWorldPointVisible(x, y, margin = 72) {
+  const zoom = game?.camera?.zoom || 1;
+  return Math.abs(x - game.player.x) <= W / (2 * zoom) + margin
+    && Math.abs(y - game.player.y) <= H / (2 * zoom) + margin;
 }
 
 function drawActorGrounding(actor) {
@@ -4389,6 +4424,7 @@ function drawActorGrounding(actor) {
   ctx.translate(x, y);
   ctx.fillStyle = sceneId === "snow" || sceneId === "moon" ? "rgba(18,28,43,.2)" : "rgba(0,0,0,.32)";
   ctx.beginPath(); ctx.ellipse(0, 0, size, size * .29, 0, 0, Math.PI * 2); ctx.fill();
+  if (game.performance.quality < .58 && !isPlayer && !isCompanion && actor.type !== "boss") { ctx.restore(); return; }
   ctx.lineWidth = isPlayer ? 1.8 : 1;
   if (sceneId === "city") {
     ctx.strokeStyle = colorAlpha(isPlayer ? game.player.combatClass.color : "#8ab37e", isPlayer ? .3 : .12);
@@ -4425,7 +4461,8 @@ function drawActorGrounding(actor) {
 function drawCombatParticle(particle) {
   const alpha = Math.min(1, particle.life / .18);
   ctx.save(); ctx.translate(particle.x, particle.y); ctx.rotate(particle.rotation || 0); ctx.globalAlpha = alpha;
-  ctx.fillStyle = particle.color; ctx.strokeStyle = particle.color; ctx.shadowColor = particle.color; ctx.shadowBlur = particle.shape ? 6 : 2;
+  ctx.fillStyle = particle.color; ctx.strokeStyle = particle.color;
+  if (game.performance.quality > .58) { ctx.shadowColor = particle.color; ctx.shadowBlur = particle.shape ? 6 : 2; }
   if (particle.shape === "spark") {
     ctx.lineWidth = Math.max(1, particle.size * .55); ctx.beginPath(); ctx.moveTo(-particle.size * 2.6, 0); ctx.lineTo(particle.size * 2.6, 0); ctx.stroke();
   } else if (particle.shape === "shard") {
@@ -4791,7 +4828,8 @@ function drawWorldDecor() {
   }
   ctx.restore();
 
-  const cell = scene.id === "hospital" ? 154 : 190;
+  const sparseDecor = game.performance?.quality < .6;
+  const cell = sparseDecor ? (scene.id === "hospital" ? 236 : 280) : (scene.id === "hospital" ? 154 : 190);
   for (let gx = Math.floor(left / cell); gx <= Math.ceil(right / cell); gx += 1) {
     for (let gy = Math.floor(top / cell); gy <= Math.ceil(bottom / cell); gy += 1) {
       const hash = Math.abs(Math.sin(gx * 91.73 + gy * 47.19));
@@ -4954,7 +4992,8 @@ function drawCorpse(corpse) {
     ctx.fillStyle = shade(corpse.color, -30); ctx.fillRect(-s * .7, -s * .12, s * .5, s * .24); ctx.fillRect(s * .12, -s * .2, s * .62, s * .28);
   }
 
-  for (let i = 0; i < 8; i += 1) {
+  const dissolveParticles = game.performance.quality < .6 ? 3 : 8;
+  for (let i = 0; i < dissolveParticles; i += 1) {
     const a = corpse.seed + i * 2.17;
     const distance = s * (.25 + dissolve * (1.1 + (i % 3) * .25));
     ctx.globalAlpha = fade * (1 - i / 11);
@@ -4971,10 +5010,6 @@ function drawEnemy(enemy) {
   const kick = enemy.hitKick || 0;
   const kickAngle = enemy.hitAngle || 0;
   ctx.translate(enemy.x + Math.cos(kickAngle) * kick, enemy.y + Math.sin(kickAngle) * kick);
-  ctx.fillStyle = "rgba(0,0,0,.28)";
-  ctx.beginPath();
-  ctx.ellipse(0, s * 0.92, s * 0.88, s * 0.25, 0, 0, Math.PI * 2);
-  ctx.fill();
   ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06));
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
@@ -5291,8 +5326,10 @@ function drawBullet(bullet) {
   const angle = Math.atan2(bullet.vy, bullet.vx);
   const pulse = 1 + Math.sin((bullet.age || 0) * 18) * .12;
   ctx.save(); ctx.translate(bullet.x, bullet.y); ctx.rotate(angle);
-  ctx.shadowColor = bullet.explosive ? "#ff9e45" : bullet.color;
-  ctx.shadowBlur = bullet.visual === "starbreaker" ? 22 : 13;
+  if (game.performance.quality > .58) {
+    ctx.shadowColor = bullet.explosive ? "#ff9e45" : bullet.color;
+    ctx.shadowBlur = bullet.visual === "starbreaker" ? 22 : 13;
+  }
   ctx.fillStyle = bullet.explosive ? "#ffb54f" : bullet.color;
 
   if (bullet.fx === "shadowBlade") {
@@ -5370,7 +5407,8 @@ function drawImpactBurst(burst) {
   const progress = 1 - burst.life / burst.maxLife;
   const alpha = Math.max(0, 1 - progress);
   ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
-  ctx.globalAlpha = alpha; ctx.shadowColor = burst.color; ctx.shadowBlur = 12; ctx.lineCap = "round";
+  ctx.globalAlpha = alpha; ctx.lineCap = "round";
+  if (game.performance.quality > .58) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
   ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(1, 0, 7 * (1 - progress) + 2, 12 * (1 - progress) + 2, 0, 0, Math.PI * 2); ctx.fill();
   const slashFx = ["powerArc", "flameArc", "qiArc", "flyingSword", "spiritSword", "spiritPet"].includes(burst.fx);
   const shieldFx = ["disinfectant", "ionArc"].includes(burst.fx);
@@ -6628,14 +6666,31 @@ function tone(frequency, duration, type = "sine", volume = 0.03, endMultiplier =
 }
 
 function frame(now) {
+  const targetFps = game?.performance?.targetFps || (LOW_POWER_DEVICE ? 30 : 60);
+  const frameInterval = 1000 / targetFps;
+  if (now < nextFrameAt - 2) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const rawDt = (now - lastFrame) / 1000 || 0;
-  const dt = Math.min(0.034, rawDt);
+  const dt = Math.min(LOW_POWER_DEVICE ? .04 : .034, rawDt);
   lastFrame = now;
+  nextFrameAt = now + frameInterval;
   ambienceTime += dt;
   if (game && rawDt < .1) {
     const performanceState = game.performance;
-    performanceState.slowFrames = rawDt > .023 ? Math.min(20, performanceState.slowFrames + 1) : Math.max(0, performanceState.slowFrames - 1);
-    performanceState.quality = performanceState.slowFrames >= 9 ? .52 : performanceState.slowFrames >= 4 ? .74 : 1;
+    const measuredMs = rawDt * 1000;
+    const budgetMs = 1000 / performanceState.targetFps;
+    performanceState.frameMs += (measuredMs - performanceState.frameMs) * .1;
+    performanceState.slowFrames = measuredMs > budgetMs * 1.22
+      ? Math.min(24, performanceState.slowFrames + 1)
+      : Math.max(0, performanceState.slowFrames - 1);
+    const ceiling = performanceState.qualityCeiling;
+    const floor = performanceState.qualityFloor;
+    const desiredQuality = performanceState.slowFrames >= 10 ? floor
+      : performanceState.slowFrames >= 4 ? Math.max(floor, ceiling * .76)
+        : ceiling;
+    performanceState.quality += (desiredQuality - performanceState.quality) * .18;
   }
   if (mode === "playing" && !paused) update(dt);
   render();
@@ -6882,6 +6937,13 @@ if (QA_MODE) {
       corpses: game.corpses.length,
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
+      performance: {
+        profile: PERFORMANCE_PROFILE.name,
+        quality: Number(game.performance.quality.toFixed(2)),
+        frameMs: Number(game.performance.frameMs.toFixed(1)),
+        targetFps: game.performance.targetFps,
+        limits: { ...EFFECT_LIMITS },
+      },
       combatClass: game.player.combatClass.id,
       branch: game.player.branchFocus,
       derivedStyle: game.player.derivedStyle,
@@ -6905,6 +6967,7 @@ async function bootGame() {
     switchHomePanel("command");
   }
   lastFrame = performance.now();
+  nextFrameAt = lastFrame;
   requestAnimationFrame(frame);
 }
 

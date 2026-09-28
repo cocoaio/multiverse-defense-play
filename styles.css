@@ -1201,6 +1201,8 @@ h1 {
 .low-power-device * { backdrop-filter:none !important; }
 .low-power-device .home-glow,.low-power-device .lobby-atmosphere { animation:none !important; }
 .low-power-device #app { box-shadow:none; }
+.mobile-device .tutorial-card { backdrop-filter:none; }
+.mobile-device :is(.home-glow,.lobby-atmosphere,.login-orbit) { will-change:auto; }
 
 @media (max-height:720px) {
   .command-sidebar button { min-height:68px; }
