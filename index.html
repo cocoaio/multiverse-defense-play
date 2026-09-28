@@ -22,7 +22,7 @@
         || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
       if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=47" />
+    <link rel="stylesheet" href="./styles.css?v=48" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -160,6 +160,7 @@
           <div class="briefing-grid">
             <button id="quickArmoryButton"><i>▦</i><span><b>装备方案</b><small id="equippedCountText">0 / 6 已装备</small></span></button>
             <button id="nextObjectiveButton"><i>✦</i><span><b>今日目标</b><small>完成 2 场战斗</small></span></button>
+            <button id="tutorialReplayButton"><i>?</i><span><b>新手训练</b><small>移动 · 拾取 · 大招</small></span></button>
           </div>
           <aside class="command-sidebar" aria-label="指挥中心快捷入口">
             <button data-retention-panel="daily"><i>✓</i><span>每日任务</span><em id="dailyRailBadge">0/4</em></button>
@@ -312,8 +313,21 @@
           <button id="endEndlessButton" class="text-button">结束本次修行</button>
         </div>
       </section>
+
+      <section id="tutorialOverlay" class="tutorial-overlay hidden" aria-live="polite" aria-label="新手教学">
+        <div class="tutorial-card">
+          <div class="tutorial-heading"><span id="tutorialStep">新兵训练 · 1/4</span><button id="tutorialSkipButton">跳过</button></div>
+          <div id="tutorialIcon" class="tutorial-icon">⌖</div>
+          <div class="tutorial-copy">
+            <h2 id="tutorialTitle">第一次出击</h2>
+            <p id="tutorialDescription">先熟悉移动、自动攻击、经验拾取和大招，再进入正式战斗。</p>
+          </div>
+          <div id="tutorialProgress" class="tutorial-progress" aria-hidden="true"><i class="active"></i><i></i><i></i><i></i></div>
+          <button id="tutorialActionButton" class="tutorial-action">带我去第一关 <span>›</span></button>
+        </div>
+      </section>
     </main>
 
-    <script defer src="./game.js?v=47"></script>
+    <script defer src="./game.js?v=48"></script>
   </body>
 </html>

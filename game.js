@@ -392,6 +392,15 @@ const ui = {
   resultLoot: $("#resultLoot"),
   resultActionText: $("#resultActionText"),
   toast: $("#toast"),
+  tutorial: $("#tutorialOverlay"),
+  tutorialStep: $("#tutorialStep"),
+  tutorialIcon: $("#tutorialIcon"),
+  tutorialTitle: $("#tutorialTitle"),
+  tutorialDescription: $("#tutorialDescription"),
+  tutorialProgress: $("#tutorialProgress"),
+  tutorialAction: $("#tutorialActionButton"),
+  tutorialSkip: $("#tutorialSkipButton"),
+  tutorialReplay: $("#tutorialReplayButton"),
 };
 
 const TOTAL_WAVES = 6;
@@ -525,6 +534,51 @@ const sceneClassProfiles = {
   },
 };
 
+// One source of truth for what the player model is visibly holding and how
+// that same object behaves in combat. This keeps every world from falling back
+// to generic arrows, orbs or swords that do not belong to its character art.
+const sceneCombatModels = {
+  city: {
+    melee: { weapon: "天罚动力刃", attack: "半月动力斩", ultimate: "动力刃破阵", icon: "刃" },
+    ranger: { weapon: "磁轨步枪", attack: "高速贯穿弹", ultimate: "无人机火力网", icon: "枪" },
+    mage: { weapon: "电弧核心", attack: "链式电弧", ultimate: "全城电涌", icon: "电" },
+  },
+  snow: {
+    melee: { weapon: "极地破冰锤", attack: "重锤冰屑", ultimate: "雪崩重锤", icon: "锤" },
+    ranger: { weapon: "极光冰矛器", attack: "贯穿冰矛", ultimate: "极光冰矛阵", icon: "矛" },
+    mage: { weapon: "液氮发生器", attack: "冷凝雪晶", ultimate: "零度暴风眼", icon: "雪" },
+  },
+  hospital: {
+    melee: { weapon: "消杀防爆盾", attack: "高压推盾", ultimate: "强压消杀冲锋", icon: "盾" },
+    ranger: { weapon: "抗体注射枪", attack: "抗体针剂", ultimate: "抗体蜂群投送", icon: "抗" },
+    mage: { weapon: "裂解试剂仪", attack: "试剂反应区", ultimate: "全域净化协议", icon: "净" },
+  },
+  orbit: {
+    melee: { weapon: "星系潮汐环", attack: "行星环绕撞击", ultimate: "星系潮汐过载", icon: "星" },
+    ranger: { weapon: "舰载磁轨炮", attack: "主炮贯穿束", ultimate: "轨道炮齐射", icon: "轨" },
+    mage: { weapon: "蜂群无人机舱", attack: "智能蜂群", ultimate: "蜂群湮灭协议", icon: "群" },
+  },
+  mars: {
+    melee: { weapon: "热能战斧", attack: "熔岩斧弧", ultimate: "熔岩断层", icon: "斧" },
+    ranger: { weapon: "荒原轨道炮", attack: "合金轨炮弹", ultimate: "前哨饱和轰炸", icon: "炮" },
+    mage: { weapon: "等离子约束器", attack: "日冕等离子", ultimate: "太阳风暴核心", icon: "核" },
+  },
+  moon: {
+    melee: { weapon: "引力重锤", attack: "月面震荡锤", ultimate: "月震裁决", icon: "锤" },
+    ranger: { weapon: "真空脉冲枪", attack: "月华脉冲", ultimate: "环月火力支援", icon: "月" },
+    mage: { weapon: "重力透镜仪", attack: "微型引力井", ultimate: "静海重力坍缩", icon: "引" },
+  },
+  cultivation: {
+    melee: { weapon: "镇岳重剑", attack: "镇岳剑罡", ultimate: "镇岳天剑", icon: "剑" },
+    ranger: { weapon: "飞虹灵剑", attack: "半月飞虹剑气", ultimate: "万剑归宗", icon: "剑" },
+    mage: { weapon: "星罗法印", attack: "两仪法箓", ultimate: "九霄雷劫", icon: "法" },
+  },
+};
+
+function getSceneCombatModel(sceneId, classId) {
+  return sceneCombatModels[sceneId]?.[classId] || sceneCombatModels.city.ranger;
+}
+
 function getSceneClassProfile(scene, classId) {
   const combatClass = classDefinitions.find((entry) => entry.id === classId) || classDefinitions[1];
   return { ...combatClass, ...(sceneClassProfiles[scene.id]?.[combatClass.id] || {}) };
@@ -593,6 +647,7 @@ const defaultMeta = {
   pet: { version: 2, unlocked: false, owned: [], selected: null, giftClaimed: false },
   petDungeon: { date: "", freeEntries: 1, adEntries: 1, clears: 0 },
   energy: { date: "", current: 8, max: 8, adRestores: 0 },
+  tutorial: { version: 1, completed: false },
 };
 
 function loadMeta() {
@@ -618,6 +673,7 @@ function loadMeta() {
       pet: { ...defaultMeta.pet, ...(saved?.pet || {}), owned: Array.isArray(saved?.pet?.owned) ? saved.pet.owned : [] },
       petDungeon: { ...defaultMeta.petDungeon, ...(saved?.petDungeon || {}) },
       energy: { ...defaultMeta.energy, ...(saved?.energy || {}) },
+      tutorial: { ...defaultMeta.tutorial, ...(saved?.tutorial || {}) },
     };
   } catch {
     return structuredClone(defaultMeta);
@@ -662,10 +718,139 @@ let pendingRunType = "main";
 let pendingPetEntryKind = null;
 let assetLaunchPending = false;
 let lastRunType = "main";
+let tutorialFlow = { homeStep: 0, battlePending: false };
 const movementKeys = new Set();
 const pointerMove = { x: W / 2, y: H / 2, originX: W / 2, originY: H / 2, active: false, touchId: null, touchMode: false };
 let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
 let selectedLevel = Math.max(1, Math.min(LEVELS_PER_SCENE, meta.currentLevel || 1));
+
+function clearTutorialFocus() {
+  document.querySelectorAll(".tutorial-focus").forEach((element) => element.classList.remove("tutorial-focus"));
+}
+
+function setTutorialProgress(step, total = 4) {
+  ui.tutorialProgress.innerHTML = Array.from({ length: total }, (_, index) => `<i class="${index <= step ? "active" : ""}"></i>`).join("");
+}
+
+function showTutorialCard({ step, total = 4, icon, title, description, action, waiting = false, combat = false, target = null, onAction = null }) {
+  clearTutorialFocus();
+  ui.tutorial.classList.remove("hidden", "home-step", "combat-step");
+  ui.tutorial.classList.add(combat ? "combat-step" : "home-step");
+  ui.tutorialStep.textContent = `新兵训练 · ${step + 1}/${total}`;
+  ui.tutorialIcon.textContent = icon;
+  ui.tutorialTitle.textContent = title;
+  ui.tutorialDescription.textContent = description;
+  ui.tutorialAction.innerHTML = `${action}${waiting ? "" : " <span>›</span>"}`;
+  ui.tutorialAction.classList.toggle("waiting", waiting);
+  ui.tutorialAction.onclick = onAction;
+  ui.tutorialAction.disabled = waiting && !onAction;
+  setTutorialProgress(step, total);
+  target?.classList.add("tutorial-focus");
+}
+
+function hideTutorialCard() {
+  clearTutorialFocus();
+  ui.tutorial.classList.add("hidden");
+  ui.tutorial.classList.remove("home-step", "combat-step", "tutorial-suspended");
+}
+
+function completeTutorial(showCompletion = true) {
+  meta.tutorial.completed = true;
+  tutorialFlow = { homeStep: 0, battlePending: false };
+  saveMeta();
+  clearTutorialFocus();
+  if (!showCompletion) { hideTutorialCard(); return; }
+  showTutorialCard({
+    step: 3,
+    icon: "✓",
+    title: "训练完成",
+    description: "你已经掌握走位、自动攻击、经验拾取和主题大招。后续每个世界的武器模型、弹道与大招都会随角色变化。",
+    action: "继续战斗",
+    combat: Boolean(game),
+    onAction: hideTutorialCard,
+  });
+  setTimeout(() => { if (meta.tutorial.completed) hideTutorialCard(); }, 4200);
+}
+
+function showHomeTutorial(step = 0) {
+  tutorialFlow.homeStep = step;
+  tutorialFlow.battlePending = false;
+  if (step === 0) {
+    showTutorialCard({
+      step: 0, icon: "界", title: "第一次出击",
+      description: "角色会自动攻击。你只需要控制走位、主动拾取经验，并在关键时刻释放大招。我们用第一关快速练一遍。",
+      action: "带我去第一关", target: ui.openMap,
+      onAction: () => {
+        selectedSceneIndex = 0; selectedLevel = 1; meta.currentScene = 0; meta.currentLevel = 1;
+        renderHome(); switchHomePanel("world"); showHomeTutorial(1);
+      },
+    });
+    return;
+  }
+  if (step === 1) {
+    showTutorialCard({
+      step: 1, icon: "01", title: "锁定第一战区",
+      description: "每关都有明确击杀任务。先从沦陷都市 01 开始，通关会逐步开放本章后续区域。",
+      action: "选择本局职业", target: ui.start,
+      onAction: () => { openLoadout("main"); requestAnimationFrame(() => showHomeTutorial(2)); },
+    });
+    return;
+  }
+  tutorialFlow.battlePending = true;
+  showTutorialCard({
+    step: 2, icon: "武", title: "模型决定攻击方式",
+    description: "看清卡片上的武器：拿动力刃就挥斩，拿磁轨枪就射击，电弧核心才会放电。任选一名角色进入实战。",
+    action: "我自己选职业", target: ui.classChoices.querySelector(".class-card"),
+    onAction: hideTutorialCard,
+  });
+}
+
+function beginCombatTutorial() {
+  if (!game) return;
+  tutorialFlow.battlePending = false;
+  game.tutorial = {
+    active: true,
+    step: "move",
+    startX: game.player.x,
+    startY: game.player.y,
+    killsAtStart: game.kills,
+    xpAtStart: game.pickedXp,
+  };
+  showTutorialCard({
+    step: 0, icon: "⌖", title: "先移动起来",
+    description: "手机按住战场并拖向目标方向；电脑让鼠标指向移动方向，也可使用 WASD。移动约两步即可。",
+    action: "等待移动…", waiting: true, combat: true,
+  });
+}
+
+function advanceCombatTutorial(nextStep) {
+  if (!game?.tutorial?.active) return;
+  game.tutorial.step = nextStep;
+  if (nextStep === "attack") {
+    game.tutorial.killsAtStart = game.kills;
+    showTutorialCard({ step: 1, icon: "✦", title: "攻击是自动的", description: "保持走位，不必连续点屏幕。角色会用当前模型手中的武器攻击最近目标。", action: "等待首次击破…", waiting: true, combat: true });
+  } else if (nextStep === "xp") {
+    game.tutorial.xpAtStart = game.pickedXp;
+    showTutorialCard({ step: 2, icon: "◆", title: "经验必须亲自拾取", description: "怪物倒下后经验留在原地。主动靠近光点，经验才会被吸收并触发升级选择。", action: "靠近经验光点…", waiting: true, combat: true });
+  } else if (nextStep === "ultimate") {
+    game.pulseTimer = 0;
+    const model = getSceneCombatModel(game.scene.id, game.player.combatClass.id);
+    showTutorialCard({ step: 3, icon: model.icon, title: `释放${model.ultimate}`, description: `大招已为教学立即充能。点击右下角大招，或在电脑按空格；它会使用与${model.weapon}一致的主题表现。`, action: "立即释放大招", combat: true, target: ui.pulse, onAction: activatePulse });
+  }
+}
+
+function updateCombatTutorial() {
+  const tutorial = game?.tutorial;
+  if (!tutorial?.active || paused) return;
+  if (tutorial.step === "move" && Math.hypot(game.player.x - tutorial.startX, game.player.y - tutorial.startY) >= 48) advanceCombatTutorial("attack");
+  else if (tutorial.step === "attack" && game.kills > tutorial.killsAtStart) advanceCombatTutorial("xp");
+  else if (tutorial.step === "xp" && game.pickedXp > tutorial.xpAtStart) advanceCombatTutorial("ultimate");
+}
+
+function shouldAutoStartTutorial() {
+  const cleared = Object.values(meta.progress).reduce((sum, value) => sum + value, 0);
+  return !QA_MODE && !ADMIN_MODE && !meta.tutorial.completed && meta.wins === 0 && cleared === 0;
+}
 
 const metaDefinitions = [
   { id: "damage", icon: "✦", name: "火力校准", detail: "每级基础伤害 +7%", costs: [110, 145, 185, 235, 295, 365, 445, 535, 635, 750] },
@@ -1212,6 +1397,7 @@ function makeGame(runType = "main") {
   const levelModifier = getLevelModifier(missionLevel);
   const combatClass = getSceneClassProfile(scene, selectedRunClass);
   const weapon = getClassWeaponVisual(combatClass);
+  const combatModel = getSceneCombatModel(scene.id, combatClass.id);
   const gear = getEquippedBonuses(combatClass.id);
   const resonance = getGearResonance(combatClass.id);
   const divineState = getDivineGearState(combatClass.id);
@@ -1285,7 +1471,7 @@ function makeGame(runType = "main") {
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
-    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · 初入仙域获得护道加持，随重天逐步解除` : `${combatClass.name} · 指向移动，靠近拾取经验`, time: 2.3 },
+    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · ${combatModel.weapon} · 初入仙域获得护道加持` : `${combatClass.name} · ${combatModel.weapon} · 靠近拾取经验`, time: 2.3 },
     player: {
       weapon,
       combatClass,
@@ -1355,12 +1541,13 @@ function openLoadout(runType = "main") {
   ui.classChoices.innerHTML = "";
   for (const combatClass of classDefinitions) {
     const themed = getSceneClassProfile(scene, combatClass.id);
+    const model = getSceneCombatModel(scene.id, combatClass.id);
     const button = document.createElement("button");
     button.className = "class-card";
     button.style.setProperty("--class-color", themed.color);
     const orbitGlyph = combatClass.id === "melee" ? "◆" : combatClass.id === "ranger" ? "▷" : "⬢";
     const gearCount = Object.values(getClassGear(combatClass.id)).filter(Boolean).length;
-    button.innerHTML = `<i class="class-portrait class-${combatClass.id}${scene.id === "orbit" ? " orbit-craft" : ""}" aria-hidden="true">${scene.id === "orbit" ? orbitGlyph : ""}</i><span><b>${themed.name}</b><p>${themed.description}<br>战力 ${getCombatPower(combatClass.id)} · 装备 ${gearCount}/6</p></span><span>›</span>`;
+    button.innerHTML = `<i class="class-portrait class-${combatClass.id}${scene.id === "orbit" ? " orbit-craft" : ""}" aria-hidden="true">${scene.id === "orbit" ? orbitGlyph : ""}</i><span><b>${themed.name}</b><p>${themed.description}<br>${model.icon} ${model.weapon} · ${model.attack}<br>战力 ${getCombatPower(combatClass.id)} · 装备 ${gearCount}/6</p></span><span>›</span>`;
     setHeroElementSprite(button.querySelector(".class-portrait"), scene.id, combatClass.id);
     button.addEventListener("click", () => startGame(combatClass.id, runType), { once: true });
     ui.classChoices.append(button);
@@ -1407,6 +1594,8 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   saveMeta();
   ui.loadoutModal.classList.add("hidden");
   game = makeGame(runType);
+  const launchTutorial = runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
+    && !meta.tutorial.completed && (tutorialFlow.battlePending || shouldAutoStartTutorial());
   for (let index = 0; index < 5; index += 1) spawnEnemy(index === 4 ? "runner" : "grunt", null, null, index / 5 * Math.PI * 2 - Math.PI / 2);
   document.querySelector("#app").dataset.scene = game.scene.id;
   mode = "playing";
@@ -1427,11 +1616,14 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   ui.pulse.setAttribute("aria-label", `释放${ultimate.ultimateName}`);
   ui.bossName.textContent = game.scene.boss;
   syncHud();
+  if (launchTutorial) beginCombatTutorial();
+  else hideTutorialCard();
   tone(225, 0.11, "sawtooth", 0.045, 1.5);
 }
 
 function finishGame(won) {
   if (mode !== "playing") return;
+  hideTutorialCard();
   mode = "result";
   paused = true;
   const resourceRun = game.runType === "resource";
@@ -1538,6 +1730,7 @@ function finishGame(won) {
 }
 
 function returnHome() {
+  hideTutorialCard();
   mode = "home";
   paused = false;
   game = null;
@@ -1608,6 +1801,7 @@ function update(dt) {
   updateXpDrops(dt);
   updateMedkits(dt);
   updateEffects(dt);
+  updateCombatTutorial();
   syncHud();
 }
 
@@ -2855,6 +3049,10 @@ function activatePulse() {
   game.shake = Math.max(game.shake, 7);
   game.flash = .18;
   if (navigator.vibrate) navigator.vibrate([45, 35, 80]);
+  if (game.tutorial?.active && game.tutorial.step === "ultimate") {
+    game.tutorial.active = false;
+    completeTutorial(true);
+  }
 }
 
 function gainXp(amount) {
@@ -2884,6 +3082,7 @@ function gainXp(amount) {
 
 function showUpgradeChoices() {
   paused = true;
+  ui.tutorial.classList.add("tutorial-suspended");
   ui.upgrade.classList.remove("hidden");
   const available = upgradeDefinitions.filter((entry) =>
     (!entry.cultivationOnly || game.scene.endless)
@@ -2959,6 +3158,7 @@ function chooseUpgrade(definition) {
   else {
     ui.upgrade.classList.add("hidden");
     paused = false;
+    ui.tutorial.classList.remove("tutorial-suspended");
   }
 }
 
@@ -4158,7 +4358,11 @@ function drawBattlefield() {
     return aDepth - bDepth;
   });
   for (const actor of actors) {
-    if (actor === game.player) drawBase();
+    drawActorGrounding(actor);
+    if (actor === game.player) {
+      drawBase();
+      drawClassAttackAnimation(game.player, game.player.attackAnim);
+    }
     else if (actor.companion) drawCompanionPet();
     else drawEnemy(actor);
   }
@@ -4171,6 +4375,50 @@ function drawBattlefield() {
   for (let index = 0; index < game.particles.length; index += particleStep) drawCombatParticle(game.particles[index]);
   ctx.globalAlpha = 1;
   for (const floater of game.floaters) drawFloater(floater);
+  ctx.restore();
+}
+
+function drawActorGrounding(actor) {
+  const isPlayer = actor === game.player;
+  const isCompanion = actor.companion;
+  const size = isPlayer ? 31 : isCompanion ? 18 : Math.max(15, actor.size * .82);
+  const x = actor.x;
+  const y = actor.y + (isPlayer ? 28 : isCompanion ? 16 : actor.size * .72);
+  const sceneId = game.scene.id;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = sceneId === "snow" || sceneId === "moon" ? "rgba(18,28,43,.2)" : "rgba(0,0,0,.32)";
+  ctx.beginPath(); ctx.ellipse(0, 0, size, size * .29, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = isPlayer ? 1.8 : 1;
+  if (sceneId === "city") {
+    ctx.strokeStyle = colorAlpha(isPlayer ? game.player.combatClass.color : "#8ab37e", isPlayer ? .3 : .12);
+    ctx.beginPath(); ctx.ellipse(0, 1, size * 1.06, size * .25, 0, 0, Math.PI * 2); ctx.stroke();
+    if (isPlayer) { ctx.globalAlpha = .16; ctx.fillStyle = game.player.combatClass.color; ctx.fillRect(-2, 2, 4, 17); }
+  } else if (sceneId === "snow") {
+    ctx.strokeStyle = "rgba(229,250,255,.48)";
+    ctx.beginPath(); ctx.ellipse(0, 0, size * 1.06, size * .31, 0, Math.PI * .08, Math.PI * .92); ctx.stroke();
+    if (!isCompanion) { ctx.strokeStyle = "rgba(104,181,208,.2)"; ctx.beginPath(); ctx.moveTo(-size * .7, 4); ctx.lineTo(size * .75, 1); ctx.stroke(); }
+  } else if (sceneId === "hospital") {
+    ctx.strokeStyle = colorAlpha(isPlayer ? "#72ffd0" : actor.color || "#7ee8cb", isPlayer ? .34 : .16);
+    ctx.beginPath(); ctx.ellipse(0, 0, size * 1.12, size * .31, 0, 0, Math.PI * 2); ctx.stroke();
+    if (isPlayer) { ctx.globalAlpha = .18; ctx.fillStyle = "#dffff8"; ctx.fillRect(-1.5, -7, 3, 14); ctx.fillRect(-7, -1.5, 14, 3); }
+  } else if (sceneId === "orbit") {
+    const accent = isPlayer ? game.player.combatClass.color : actor.color || "#8f8dff";
+    ctx.strokeStyle = colorAlpha(accent, isPlayer ? .46 : .18); ctx.setLineDash([5, 7]);
+    ctx.beginPath(); ctx.ellipse(0, 0, size * 1.2, size * .38, ambienceTime * .25, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = colorAlpha(accent, .1); ctx.beginPath(); ctx.ellipse(0, 0, size * .72, size * .2, 0, 0, Math.PI * 2); ctx.fill();
+  } else if (sceneId === "mars") {
+    ctx.strokeStyle = "rgba(255,172,102,.28)"; ctx.setLineDash([3, 5]);
+    ctx.beginPath(); ctx.ellipse(0, 0, size * 1.13, size * .34, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    if (isPlayer) { ctx.fillStyle = "rgba(255,121,67,.16)"; for (let i = 0; i < 4; i += 1) { ctx.beginPath(); ctx.arc(-size + i * size * .62, 2 + (i % 2) * 3, 2, 0, Math.PI * 2); ctx.fill(); } }
+  } else if (sceneId === "moon") {
+    ctx.strokeStyle = "rgba(222,224,255,.34)"; ctx.beginPath(); ctx.ellipse(0, 0, size * 1.08, size * .32, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(137,242,255,.16)"; ctx.beginPath(); ctx.ellipse(0, 0, size * .72, size * .18, 0, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    const accent = isPlayer ? game.player.combatClass.color : actor.color || "#a8e9c0";
+    ctx.strokeStyle = colorAlpha(accent, isPlayer ? .42 : .16); ctx.rotate(ambienceTime * (isPlayer ? .22 : -.1));
+    ctx.beginPath(); for (let i = 0; i <= 6; i += 1) { const angle = i / 6 * Math.PI * 2; const radius = size * (i % 2 ? .74 : 1.08); if (!i) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius * .28); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius * .28); } ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -6401,6 +6649,7 @@ ui.guestLogin.addEventListener("click", () => {
   ui.home.classList.remove("hidden");
   switchHomePanel("command");
   tone(392, .18, "triangle", .035, 1.8);
+  if (shouldAutoStartTutorial()) setTimeout(() => showHomeTutorial(0), 240);
 });
 document.querySelectorAll("[data-login-provider]").forEach((button) => button.addEventListener("click", () => {
   showToast(`${button.dataset.loginProvider}登录接口已预留，原型阶段请先以游客进入`);
@@ -6409,6 +6658,13 @@ ui.commandTab.addEventListener("click", () => switchHomePanel("command"));
 ui.openMap.addEventListener("click", () => switchHomePanel("world"));
 ui.quickArmory.addEventListener("click", () => switchHomePanel("armory"));
 ui.nextObjective.addEventListener("click", () => openRetentionPanel("daily"));
+ui.tutorialReplay.addEventListener("click", () => {
+  meta.tutorial.completed = false;
+  saveMeta();
+  switchHomePanel("command");
+  showHomeTutorial(0);
+});
+ui.tutorialSkip.addEventListener("click", () => completeTutorial(false));
 ui.start.addEventListener("click", () => openLoadout("main"));
 ui.retry.addEventListener("click", () => {
   if (lastRunType === "petDungeon") {
