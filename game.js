@@ -729,7 +729,7 @@ let pendingRunType = "main";
 let pendingPetEntryKind = null;
 let assetLaunchPending = false;
 let lastRunType = "main";
-let tutorialFlow = { homeStep: 0, battlePending: false };
+let tutorialFlow = { homeStep: 0, battlePending: false, featurePaused: false };
 const movementKeys = new Set();
 const pointerMove = { x: W / 2, y: H / 2, originX: W / 2, originY: H / 2, active: false, touchId: null, touchMode: false };
 let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
@@ -743,11 +743,11 @@ function setTutorialProgress(step, total = 4) {
   ui.tutorialProgress.innerHTML = Array.from({ length: total }, (_, index) => `<i class="${index <= step ? "active" : ""}"></i>`).join("");
 }
 
-function showTutorialCard({ step, total = 4, icon, title, description, action, waiting = false, combat = false, target = null, onAction = null }) {
+function showTutorialCard({ step, total = 4, section = "新兵训练", icon, title, description, action, waiting = false, combat = false, target = null, onAction = null }) {
   clearTutorialFocus();
   ui.tutorial.classList.remove("hidden", "home-step", "combat-step");
   ui.tutorial.classList.add(combat ? "combat-step" : "home-step");
-  ui.tutorialStep.textContent = `新兵训练 · ${step + 1}/${total}`;
+  ui.tutorialStep.textContent = `${section} · ${step + 1}/${total}`;
   ui.tutorialIcon.textContent = icon;
   ui.tutorialTitle.textContent = title;
   ui.tutorialDescription.textContent = description;
@@ -765,22 +765,54 @@ function hideTutorialCard() {
   ui.tutorial.classList.remove("home-step", "combat-step", "tutorial-suspended");
 }
 
-function completeTutorial(showCompletion = true) {
+function finishTutorial(showCompletion = true) {
   meta.tutorial.completed = true;
-  tutorialFlow = { homeStep: 0, battlePending: false };
+  const shouldResume = tutorialFlow.featurePaused && game && mode === "playing" && !manuallyPaused;
+  tutorialFlow = { homeStep: 0, battlePending: false, featurePaused: false };
   saveMeta();
-  clearTutorialFocus();
-  if (!showCompletion) { hideTutorialCard(); return; }
+  if (shouldResume) paused = false;
+  hideTutorialCard();
+  if (showCompletion) showToast("训练完成：右侧栏可随时查看任务、活动与副本");
+}
+
+function showFeatureTutorial(step = 0) {
+  const featureSteps = [
+    {
+      icon: "任", title: "每日任务与限时活动",
+      description: "每日任务会在 00:00 刷新，完成击杀、通关与成长目标可领补给币。活动中心还有登录补给和自愿观看的奖励广告。",
+      action: "了解资源副本",
+    },
+    {
+      icon: "境", title: "打不过就去丰饶之境",
+      description: "丰饶之境每天可挑战 3 次，稳定产出装备、经验和补给币；通关第三章后还会开放灵宠试炼。",
+      action: "了解养成系统",
+    },
+    {
+      icon: "装", title: "装备、灵宠与大招装扮",
+      description: "装备提供真实数值成长，灵宠会协同作战；幻装商城改变大招颜色和释放形式，部分主题需要对应装扮才能进入。",
+      action: "查看入口位置",
+    },
+    {
+      icon: "✓", title: "功能入口都在指挥中心右侧",
+      description: "每日任务、活动、资源副本、灵宠试炼和商城都集中在右侧栏。忘记玩法时，可点击“新手训练”重新查看。",
+      action: "返回战斗",
+    },
+  ];
+  if (step === 0 && game && mode === "playing" && !paused) {
+    tutorialFlow.featurePaused = true;
+    paused = true;
+  }
+  const entry = featureSteps[step];
   showTutorialCard({
-    step: 3,
-    icon: "✓",
-    title: "训练完成",
-    description: "你已经掌握走位、自动攻击、经验拾取和主题大招。后续每个世界的武器模型、弹道与大招都会随角色变化。",
-    action: "继续战斗",
-    combat: Boolean(game),
-    onAction: hideTutorialCard,
+    step, total: featureSteps.length, section: "功能导览", combat: Boolean(game),
+    ...entry,
+    onAction: step < featureSteps.length - 1 ? () => showFeatureTutorial(step + 1) : () => finishTutorial(true),
   });
-  setTimeout(() => { if (meta.tutorial.completed) hideTutorialCard(); }, 4200);
+}
+
+function completeTutorial(showCompletion = true) {
+  if (showCompletion) showFeatureTutorial(0);
+  else finishTutorial(false);
 }
 
 function showHomeTutorial(step = 0) {
@@ -2969,6 +3001,9 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     accent: bullet.accent || bullet.color,
     fx: bullet.fx || "tracer",
     angle,
+    sceneId: game.scene.id,
+    classId: game.player.combatClass.id,
+    seed: (enemy?.sway || 0) + (bullet.id || 0) * .173,
     contactAttack: Boolean(bullet.contactAttack),
     targetId: enemy?.id ?? null,
     offsetX: enemy ? x - enemy.x : 0,
@@ -5310,12 +5345,32 @@ function drawLunarEnemy(enemy, s, frozen) {
 function drawProjectileTrail(bullet) {
   if (!bullet.trail?.length) return;
   const accent = bullet.accent || bullet.color;
-  ctx.save(); ctx.lineCap = "round";
-  for (let i = bullet.trail.length - 1; i >= 1; i -= 1) {
-    const from = bullet.trail[i]; const to = bullet.trail[i - 1]; const alpha = (1 - i / bullet.trail.length) * .62;
-    ctx.strokeStyle = colorAlpha(i % 2 ? bullet.color : accent, alpha);
-    ctx.lineWidth = Math.max(.6, (bullet.size + 2) * (1 - i / bullet.trail.length));
-    ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+  const tail = bullet.trail[bullet.trail.length - 1];
+  const dx = bullet.x - tail.x;
+  const dy = bullet.y - tail.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const nx = -dy / length;
+  const ny = dx / length;
+  const width = Math.max(2, bullet.size + (bullet.visual === "starbreaker" ? 5 : 2));
+  const glow = ctx.createLinearGradient(tail.x, tail.y, bullet.x, bullet.y);
+  glow.addColorStop(0, colorAlpha(accent, 0));
+  glow.addColorStop(.52, colorAlpha(accent, .28));
+  glow.addColorStop(.84, colorAlpha(bullet.color, .72));
+  glow.addColorStop(1, colorAlpha("#ffffff", .92));
+  ctx.save();
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.moveTo(tail.x + nx * .4, tail.y + ny * .4);
+  ctx.lineTo(bullet.x + nx * width, bullet.y + ny * width);
+  ctx.lineTo(bullet.x - nx * width, bullet.y - ny * width);
+  ctx.lineTo(tail.x - nx * .4, tail.y - ny * .4);
+  ctx.closePath();
+  ctx.fill();
+  if (game.performance.quality > .58) {
+    ctx.strokeStyle = colorAlpha("#ffffff", .62);
+    ctx.lineWidth = Math.max(.8, width * .22);
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(bullet.x, bullet.y); ctx.stroke();
   }
   ctx.restore();
 }
@@ -5403,6 +5458,46 @@ function drawBullet(bullet) {
   ctx.restore();
 }
 
+function drawImpactMaterial(burst, progress, alpha) {
+  const count = game.performance.quality > .58 ? 5 : 3;
+  const sceneId = burst.sceneId || game.scene.id;
+  const seed = burst.seed || .37;
+  ctx.save();
+  ctx.globalAlpha = alpha * .86;
+  for (let i = 0; i < count; i += 1) {
+    const angle = -1.08 + i * (2.16 / Math.max(1, count - 1)) + Math.sin(seed * 7 + i * 4.3) * .13;
+    const distance = 10 + progress * (23 + (i % 3) * 8);
+    ctx.save();
+    ctx.rotate(angle);
+    ctx.translate(distance, 0);
+    ctx.rotate(progress * (i % 2 ? -3.8 : 4.6) + seed);
+    if (sceneId === "snow") {
+      ctx.fillStyle = i % 2 ? "#ffffff" : "#8de4ff";
+      ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -3); ctx.lineTo(-2, 5); ctx.closePath(); ctx.fill();
+    } else if (sceneId === "hospital") {
+      ctx.fillStyle = i % 2 ? "#effff9" : "#72ffd0";
+      ctx.fillRect(-2, -7, 4, 14); ctx.fillRect(-7, -2, 14, 4);
+    } else if (sceneId === "orbit") {
+      ctx.strokeStyle = i % 2 ? "#ffffff" : "#6deaff"; ctx.lineWidth = 1.4;
+      ctx.strokeRect(-5, -5, 10, 10); ctx.fillStyle = colorAlpha("#6deaff", .4); ctx.fillRect(-2, -2, 4, 4);
+    } else if (sceneId === "mars") {
+      ctx.fillStyle = i % 2 ? "#ffc36b" : "#d94c2d";
+      ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-4, -4); ctx.lineTo(-7, 3); ctx.closePath(); ctx.fill();
+    } else if (sceneId === "moon") {
+      ctx.fillStyle = i % 2 ? "#ecebff" : "#8cdfff";
+      ctx.beginPath(); ctx.ellipse(0, 0, 7, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (sceneId === "cultivation") {
+      ctx.fillStyle = i % 2 ? "#fff3c7" : burst.color;
+      ctx.fillRect(-7, -1.5, 14, 3); ctx.fillRect(1, -5, 2, 10);
+    } else {
+      ctx.fillStyle = i % 2 ? "#ffd36b" : "#ff6c42";
+      ctx.fillRect(-7, -2, 14, 4);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawImpactBurst(burst) {
   const progress = 1 - burst.life / burst.maxLife;
   const alpha = Math.max(0, 1 - progress);
@@ -5444,6 +5539,7 @@ function drawImpactBurst(burst) {
   } else if (burst.fx === "drone") {
     ctx.strokeStyle = "#baf5ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-4, -15); ctx.lineTo(16 + progress * 22, -5); ctx.moveTo(-4, 15); ctx.lineTo(16 + progress * 22, 5); ctx.stroke();
   }
+  drawImpactMaterial(burst, progress, alpha);
   if (burst.critical) { ctx.strokeStyle = "#fff36a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 + progress * 28, 0, Math.PI * 2); ctx.stroke(); }
   ctx.restore();
 }
@@ -5709,6 +5805,45 @@ function drawUltimateEffect() {
   ctx.restore();
 }
 
+function drawAttackTimingAccent(player, eased) {
+  if (eased < .08) return;
+  const classId = player.combatClass.id;
+  const color = player.combatClass.color;
+  const sceneAccent = {
+    city: "#ffd86b", snow: "#dffbff", hospital: "#eafff8", orbit: "#8cecff",
+    mars: "#ffb164", moon: "#dcd9ff", cultivation: "#fff0a8",
+  }[game.scene.id] || color;
+  ctx.save();
+  ctx.globalCompositeOperation = game.performance.quality > .58 ? "lighter" : "source-over";
+  if (classId === "melee" || (game.scene.endless && classId === "ranger")) {
+    if (game.scene.id === "orbit") { ctx.restore(); return; }
+    const sweep = .55 + eased * .55;
+    ctx.strokeStyle = colorAlpha(sceneAccent, .26 + eased * .55);
+    ctx.lineWidth = 3.5 + eased * 3;
+    ctx.beginPath(); ctx.arc(4, 0, 72 + eased * 17, -sweep, sweep); ctx.stroke();
+    ctx.strokeStyle = colorAlpha("#ffffff", .38 + eased * .46); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(4, 0, 79 + eased * 20, -sweep * .86, sweep * .74); ctx.stroke();
+  } else if (classId === "ranger") {
+    const muzzleX = 40 + eased * 13;
+    ctx.fillStyle = colorAlpha(sceneAccent, .34 + eased * .56);
+    ctx.beginPath(); ctx.moveTo(muzzleX + 22, 0); ctx.lineTo(muzzleX, -10); ctx.lineTo(muzzleX + 6, 0); ctx.lineTo(muzzleX, 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = colorAlpha("#ffffff", .45 + eased * .4); ctx.lineWidth = 1.4;
+    for (const offset of [-7, 0, 7]) { ctx.beginPath(); ctx.moveTo(muzzleX + 13, offset * .35); ctx.lineTo(muzzleX + 48 + eased * 20, offset); ctx.stroke(); }
+  } else {
+    const castX = 50 + eased * 10;
+    ctx.save(); ctx.translate(castX, 0); ctx.rotate(ambienceTime * 2.7);
+    ctx.strokeStyle = colorAlpha(sceneAccent, .45 + eased * .45); ctx.lineWidth = 1.8;
+    const radius = 21 + eased * 8;
+    ctx.beginPath();
+    for (let i = 0; i <= 6; i += 1) { const angle = i * Math.PI / 3; if (!i) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); }
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 3; i += 1) { const angle = i / 3 * Math.PI * 2; ctx.beginPath(); ctx.arc(Math.cos(angle) * radius, Math.sin(angle) * radius, 2.2, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawClassAttackAnimation(player, attack) {
   if (attack <= 0) return;
   const eased = Math.sin(Math.min(1, attack) * Math.PI);
@@ -5800,6 +5935,7 @@ function drawClassAttackAnimation(player, attack) {
     ctx.fillStyle = "#e8ffff";
     for (let i = 0; i < 5; i += 1) { ctx.beginPath(); ctx.arc(44 + i * 8 + Math.sin(i * 9) * 3, Math.sin(i * 4.3) * 8, 1.7 + i * .18, 0, Math.PI * 2); ctx.fill(); }
   }
+  drawAttackTimingAccent(player, eased);
   ctx.restore();
 }
 
