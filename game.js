@@ -7,6 +7,7 @@ const MOBILE_DEVICE = document.documentElement.classList.contains("mobile-device
   || navigator.maxTouchPoints > 1
   || matchMedia("(pointer: coarse)").matches;
 const COMPAT_ASSET_MODE = LOW_POWER_DEVICE || location.protocol === "file:";
+const openingSplash = createAssetImage("./assets/opening-splash-v1.jpg", true);
 function createAssetImage(src, eager = false, fallbackSrc = "") {
   const image = new Image();
   image.decoding = "async";
@@ -92,6 +93,7 @@ const sceneHeroSprites = Object.fromEntries(sceneIds.map((sceneId) => [sceneId, 
 const assetResolvedUrls = new Map();
 
 const BOOT_ASSET_SIZES = {
+  "./assets/opening-splash-v1.jpg": 642358,
   "./assets/fallback/city-battlefield-v1.jpg": 328073, "./assets/fallback/cultivation-battlefield-v1.jpg": 370407,
   "./assets/fallback/hospital-battlefield-v1.jpg": 273070, "./assets/fallback/mars-battlefield-v1.jpg": 343644,
   "./assets/fallback/moon-battlefield-v1.jpg": 429205, "./assets/fallback/orbit-battlefield-v1.jpg": 313647,
@@ -108,6 +110,7 @@ const BOOT_ASSET_SIZES = {
 };
 
 const bootAssetTargets = new Map([
+  ["./assets/opening-splash-v1.jpg", openingSplash],
   ["./assets/fallback/city-battlefield-v1.jpg", cityBattlefield], ["./assets/fallback/snow-battlefield-v1.jpg", snowBattlefield],
   ["./assets/fallback/hospital-battlefield-v1.jpg", hospitalBattlefield], ["./assets/fallback/orbit-battlefield-v1.jpg", orbitBattlefield],
   ["./assets/fallback/mars-battlefield-v1.jpg", marsBattlefield], ["./assets/fallback/moon-battlefield-v1.jpg", moonBattlefield],
@@ -153,6 +156,9 @@ async function assignBootAsset(entry, url) {
   image.src = url;
   const ready = await waitForAsset(image, 20000);
   if (ready && image.decode) await image.decode().catch(() => {});
+  if (ready && entry.path === "./assets/opening-splash-v1.jpg") {
+    document.querySelector(".opening-keyart")?.style.setProperty("--opening-bg", `url("${url}")`);
+  }
   return ready;
 }
 

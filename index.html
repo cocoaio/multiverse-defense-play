@@ -9,9 +9,9 @@
     <meta name="description" content="多元防线：跨越城市、雪原、医院与星球的竖屏 Roguelike 割草游戏。" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="多元防线 · 微信即点即玩" />
-    <meta property="og:description" content="跨越沦陷都市、极地雪原与太虚仙域，立即开始竖屏割草战斗。" />
+    <meta property="og:description" content="一人一枪穿越七界：自动攻击、自由走位、每局随机构筑，立即开始竖屏割草战斗。" />
     <meta property="og:url" content="https://multiverse-defense-play.fullunull.chatgpt.site/" />
-    <meta property="og:image" content="https://multiverse-defense-play.fullunull.chatgpt.site/assets/posters/original/city-heroes-v1.webp" />
+    <meta property="og:image" content="https://multiverse-defense-play.fullunull.chatgpt.site/assets/opening-splash-v1.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" />
@@ -27,7 +27,7 @@
       if (mobile) document.documentElement.classList.add("mobile-device");
       if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=50" />
+    <link rel="stylesheet" href="./styles.css?v=51" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -48,25 +48,38 @@
       </section>
 
       <section id="loginScreen" class="screen login-screen" aria-label="登录多元防线">
-        <div class="login-art" aria-hidden="true">
-          <span class="login-orbit orbit-a"></span>
-          <span class="login-orbit orbit-b"></span>
-          <span class="login-core">界</span>
+        <div class="opening-keyart" aria-hidden="true">
+          <div class="opening-rift"></div>
+          <div class="opening-scanline"></div>
         </div>
-        <div class="login-copy">
-          <p>SEVEN WORLDS · ONE DEFENSE</p>
-          <h1>多元防线</h1>
-          <span>穿越七个世界，培养属于你的战斗流派</span>
+        <header class="opening-header">
+          <div class="opening-season"><i>首发赛季</i><span>七界裂隙已经开启</span></div>
+          <div class="opening-status"><i></i>在线</div>
+        </header>
+        <div class="opening-copy">
+          <p>SEVEN WORLDS · ONE LAST DEFENSE</p>
+          <h1><span>多元</span>防线</h1>
+          <strong>一人一枪，横扫七个世界</strong>
+          <small>自动攻击 · 自由走位 · 每局随机构筑</small>
+        </div>
+        <div class="opening-worlds" aria-label="可探索主题">
+          <span><i>☣</i><b>都市尸潮</b></span>
+          <span><i>✦</i><b>星舰风暴</b></span>
+          <span><i>剑</i><b>太虚修行</b></span>
         </div>
         <div class="login-panel">
-          <div class="login-panel-title"><span>账号登录</span><small>接口预留 · 当前为原型体验</small></div>
+          <button id="guestLoginButton" class="guest-login">
+            <i>立即出击</i>
+            <span><b>进入第一战区</b><small>无需登录 · 进度保存在本机</small></span>
+            <em>›</em>
+          </button>
+          <div class="login-divider"><span>账号登录功能预留</span></div>
           <div class="login-methods">
-            <button data-login-provider="微信"><i class="wechat-mark">微</i><span>微信登录</span><em>待接入</em></button>
-            <button data-login-provider="抖音"><i class="douyin-mark">抖</i><span>抖音登录</span><em>待接入</em></button>
-            <button data-login-provider="邮箱"><i>邮</i><span>邮箱登录</span><em>待接入</em></button>
-            <button data-login-provider="手机号"><i>手</i><span>手机号登录</span><em>待接入</em></button>
+            <button data-login-provider="微信" aria-label="微信登录"><i class="wechat-mark">微</i><span>微信</span></button>
+            <button data-login-provider="抖音" aria-label="抖音登录"><i class="douyin-mark">抖</i><span>抖音</span></button>
+            <button data-login-provider="邮箱" aria-label="邮箱登录"><i>邮</i><span>邮箱</span></button>
+            <button data-login-provider="手机号" aria-label="手机号登录"><i>手</i><span>手机</span></button>
           </div>
-          <button id="guestLoginButton" class="guest-login">游客进入基地 <span>→</span></button>
           <p class="login-legal">进入游戏即代表同意《用户协议》与《隐私政策》</p>
         </div>
       </section>
@@ -333,6 +346,6 @@
       </section>
     </main>
 
-    <script defer src="./game.js?v=50"></script>
+    <script defer src="./game.js?v=51"></script>
   </body>
 </html>
