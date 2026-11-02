@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "72";
+const ASSET_REVISION = "73";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -669,6 +669,23 @@ const impactMaterialProfiles = {
   cultivation: { material: "spirit", color: "#ddffe4", debris: "glyph" },
 };
 
+const hitReactionSoundProfiles = {
+  slash: { frequency: 185, type: "sawtooth", duration: .072, endMultiplier: .42 },
+  ballistic: { frequency: 132, type: "square", duration: .046, endMultiplier: .68 },
+  crush: { frequency: 64, type: "sawtooth", duration: .11, endMultiplier: .38 },
+  elemental: { frequency: 360, type: "sine", duration: .09, endMultiplier: 1.55 },
+};
+
+const hitMaterialSoundProfiles = {
+  flesh: { frequency: 92, type: "triangle", duration: .065, endMultiplier: .56 },
+  ice: { frequency: 940, type: "triangle", duration: .09, endMultiplier: 1.12 },
+  membrane: { frequency: 270, type: "sine", duration: .078, endMultiplier: .48 },
+  alloy: { frequency: 1180, type: "square", duration: .052, endMultiplier: .36 },
+  stone: { frequency: 82, type: "sawtooth", duration: .105, endMultiplier: .44 },
+  ceramic: { frequency: 820, type: "triangle", duration: .082, endMultiplier: .7 },
+  spirit: { frequency: 520, type: "sine", duration: .115, endMultiplier: 1.7 },
+};
+
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
 }
@@ -945,6 +962,18 @@ let renderFailureCount = 0;
 let nextId = 1;
 let toastTimer = 0;
 let audioContext = null;
+const combatAudioState = {
+  activeVoices: 0,
+  maxVoices: LOW_POWER_DEVICE ? 3 : MOBILE_DEVICE ? 5 : 8,
+  lastAt: -Infinity,
+  lastPriority: 0,
+  played: 0,
+  dropped: 0,
+  suppressed: 0,
+  lastReaction: null,
+  lastMaterial: null,
+  history: [],
+};
 let adTimer = null;
 let pendingAdReward = null;
 let selectedRunClass = meta.selectedClass || "ranger";
@@ -3849,6 +3878,7 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     divineWeapon: Boolean(bullet.divineWeapon),
     divineClass: bullet.divineClass || null,
   });
+  if (!lightweight) playCombatImpactSound(getEnemyHitReactionType(bullet), materialProfile.material, critical, enemy?.type === "boss");
   const particleShape = ["snowball", "icicle", "cryo"].includes(bullet.fx) ? "shard"
     : ["powerArc", "flameArc", "flyingSword", "spiritSword", "spiritPet", "rail", "tracer"].includes(bullet.fx) ? "spark"
       : ["spell", "serum"].includes(bullet.fx) ? "glyph" : materialProfile.debris;
@@ -8744,6 +8774,65 @@ function tone(frequency, duration, type = "sine", volume = 0.03, endMultiplier =
   oscillator.stop(now + duration);
 }
 
+function scheduleCombatTone(profile, volume, delay = 0) {
+  if (muted || !preferences.sfx || !audioContext || audioContext.state !== "running") return false;
+  if (combatAudioState.activeVoices >= combatAudioState.maxVoices) return false;
+  let voiceReserved = false;
+  try {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const start = audioContext.currentTime + delay;
+    const end = start + profile.duration;
+    oscillator.type = profile.type;
+    oscillator.frequency.setValueAtTime(profile.frequency, start);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, profile.frequency * profile.endMultiplier), end);
+    gain.gain.setValueAtTime(volume, start);
+    gain.gain.exponentialRampToValueAtTime(.0001, end);
+    oscillator.connect(gain).connect(audioContext.destination);
+    combatAudioState.activeVoices += 1;
+    voiceReserved = true;
+    oscillator.onended = () => { combatAudioState.activeVoices = Math.max(0, combatAudioState.activeVoices - 1); };
+    oscillator.start(start);
+    oscillator.stop(end);
+    return true;
+  } catch (error) {
+    if (voiceReserved) combatAudioState.activeVoices = Math.max(0, combatAudioState.activeVoices - 1);
+    return false;
+  }
+}
+
+function playCombatImpactSound(reaction, material, critical = false, boss = false) {
+  combatAudioState.lastReaction = reaction;
+  combatAudioState.lastMaterial = material;
+  if (muted || !preferences.sfx || !audioContext || audioContext.state !== "running") {
+    combatAudioState.suppressed += 1;
+    return false;
+  }
+  const now = performance.now();
+  const priority = boss ? 3 : critical ? 2 : reaction === "crush" || reaction === "slash" ? 1 : 0;
+  const minGap = LOW_POWER_DEVICE ? 105 : MOBILE_DEVICE ? 76 : 52;
+  const elapsed = now - combatAudioState.lastAt;
+  if (elapsed < 18 || (elapsed < minGap && priority <= combatAudioState.lastPriority)) {
+    combatAudioState.dropped += 1;
+    return false;
+  }
+  const reactionProfile = hitReactionSoundProfiles[reaction] || hitReactionSoundProfiles.ballistic;
+  const materialProfile = hitMaterialSoundProfiles[material] || hitMaterialSoundProfiles.flesh;
+  const gainScale = (critical ? 1.28 : 1) * (boss ? 1.16 : 1);
+  const primaryPlayed = scheduleCombatTone(reactionProfile, .0115 * gainScale);
+  const materialPlayed = scheduleCombatTone(materialProfile, .0085 * gainScale, .008);
+  if (!primaryPlayed && !materialPlayed) {
+    combatAudioState.dropped += 1;
+    return false;
+  }
+  combatAudioState.lastAt = now;
+  combatAudioState.lastPriority = priority;
+  combatAudioState.played += 1;
+  combatAudioState.history.push({ reaction, material, critical: Boolean(critical), boss: Boolean(boss) });
+  if (combatAudioState.history.length > 12) combatAudioState.history.shift();
+  return true;
+}
+
 function frame(now) {
   const targetFps = game?.performance?.targetFps || (LOW_POWER_DEVICE ? 30 : 60);
   const frameInterval = 1000 / targetFps;
@@ -9202,6 +9291,18 @@ if (QA_MODE) {
         impactIntensity: game.cinematicImpact ? Number(game.cinematicImpact.intensity.toFixed(2)) : 0,
         bossShock: Number(game.bossShock.toFixed(2)),
         renderedShake: preferences.reduceMotion ? 0 : Number(game.shake.toFixed(2)),
+      },
+      combatAudio: {
+        enabled: preferences.sfx && !muted,
+        contextState: audioContext?.state || "unavailable",
+        activeVoices: combatAudioState.activeVoices,
+        maxVoices: combatAudioState.maxVoices,
+        played: combatAudioState.played,
+        dropped: combatAudioState.dropped,
+        suppressed: combatAudioState.suppressed,
+        lastReaction: combatAudioState.lastReaction,
+        lastMaterial: combatAudioState.lastMaterial,
+        history: combatAudioState.history.slice(-8),
       },
     } : { mode, cosmetics: { equipped: meta.skins.equipped, owned: [...meta.skins.owned], preview: selectedSkinPreviewId, coins: meta.coins } },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
