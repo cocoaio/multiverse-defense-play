@@ -1360,8 +1360,222 @@ h1 {
 #app[data-scene="hospital"] { --lobby-hero-w:226px;--lobby-hero-h:301px;--scene-hero-w:82px;--scene-hero-h:109px; }
 #app[data-scene="cultivation"] .scene-hero { background-position:50% center; }
 
+/* v80 art-direction pass: cinematic multiverse command center. */
+.home-screen {
+  isolation:isolate;
+  background:
+    linear-gradient(180deg,rgba(3,9,12,.28),rgba(3,10,11,.76) 45%,rgba(2,6,8,.97) 88%),
+    radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--acid) 14%,transparent),transparent 44%),
+    url("./assets/command-center-v1.webp") center 42% / cover no-repeat;
+}
+.home-screen::before {
+  content:"";
+  position:absolute;
+  z-index:0;
+  inset:0;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(0,0,0,.5),transparent 21%,transparent 79%,rgba(0,0,0,.5)),
+    repeating-linear-gradient(180deg,transparent 0 5px,rgba(104,255,226,.018) 6px 7px),
+    radial-gradient(ellipse at 50% 44%,transparent 20%,rgba(0,0,0,.48) 100%);
+}
+.home-screen::after {
+  content:"";
+  position:absolute;
+  z-index:1;
+  left:-35%;
+  top:7%;
+  width:170%;
+  height:1px;
+  pointer-events:none;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--acid) 72%,#ffffff),transparent);
+  box-shadow:0 0 18px color-mix(in srgb,var(--acid) 52%,transparent),0 0 48px color-mix(in srgb,var(--cyan) 22%,transparent);
+  opacity:.44;
+  animation:commandScan 6.8s cubic-bezier(.36,0,.64,1) infinite;
+}
+.home-screen > :not(.home-glow) { position:relative;z-index:2; }
+.home-screen .home-glow { z-index:0;width:150%;top:8%;background:radial-gradient(circle,color-mix(in srgb,var(--cyan) 14%,transparent),transparent 61%); }
+.home-header {
+  width:100%;
+  padding:8px 9px;
+  border:1px solid color-mix(in srgb,var(--cyan) 18%,rgba(255,255,255,.08));
+  border-radius:16px;
+  background:linear-gradient(115deg,rgba(5,18,21,.86),rgba(9,22,20,.64));
+  box-shadow:inset 0 1px rgba(255,255,255,.055),0 10px 30px rgba(0,0,0,.32),0 0 28px color-mix(in srgb,var(--cyan) 5%,transparent);
+  backdrop-filter:blur(14px) saturate(1.2);
+}
+.settings-pill,.energy-pill,.bank-pill {
+  border-color:color-mix(in srgb,var(--cyan) 24%,rgba(255,255,255,.08));
+  background:linear-gradient(145deg,rgba(30,59,65,.62),rgba(4,15,18,.78));
+  box-shadow:inset 0 1px rgba(255,255,255,.08),0 6px 15px rgba(0,0,0,.26);
+}
+.home-screen .record-strip {
+  overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--acid) 15%,rgba(255,255,255,.08));
+  border-radius:13px;
+  background:linear-gradient(90deg,rgba(5,18,19,.8),rgba(10,28,24,.66),rgba(5,18,19,.8));
+  box-shadow:inset 0 1px rgba(255,255,255,.04),0 8px 22px rgba(0,0,0,.22);
+  backdrop-filter:blur(10px);
+}
+.home-screen .record-strip span { color:#92aaa4;letter-spacing:.05em; }
+.home-screen .record-strip b { color:#effff8;text-shadow:0 0 12px color-mix(in srgb,var(--acid) 28%,transparent); }
+.command-panel { padding-right:74px; }
+.lobby-stage {
+  border-color:color-mix(in srgb,var(--acid) 36%,rgba(255,255,255,.12));
+  border-radius:24px;
+  background-image:
+    linear-gradient(180deg,rgba(1,6,9,.08),rgba(2,8,10,.22) 42%,color-mix(in srgb,var(--scene-dark) 90%,transparent) 94%),
+    url("./assets/command-center-v1.webp");
+  background-position:center 45%;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.045),
+    inset 0 -80px 90px rgba(0,0,0,.45),
+    0 24px 55px rgba(0,0,0,.48),
+    0 0 34px color-mix(in srgb,var(--acid) 9%,transparent);
+}
+.lobby-stage::before {
+  z-index:1;
+  background:
+    linear-gradient(90deg,rgba(0,0,0,.45),transparent 34%,transparent 70%,rgba(0,0,0,.32)),
+    linear-gradient(180deg,rgba(255,255,255,.025),transparent 22%);
+}
+.lobby-stage::after {
+  content:"";
+  position:absolute;
+  z-index:1;
+  left:50%;
+  bottom:48px;
+  width:238px;
+  height:74px;
+  transform:translateX(-44%);
+  border:1px solid color-mix(in srgb,var(--acid) 52%,transparent);
+  border-radius:50%;
+  background:
+    radial-gradient(ellipse,color-mix(in srgb,var(--acid) 14%,transparent),transparent 62%),
+    repeating-radial-gradient(ellipse at center,transparent 0 16px,color-mix(in srgb,var(--cyan) 16%,transparent) 17px 18px);
+  box-shadow:0 0 20px color-mix(in srgb,var(--acid) 22%,transparent),inset 0 0 24px color-mix(in srgb,var(--cyan) 12%,transparent);
+  animation:commandPlatform 3.4s ease-in-out infinite;
+}
+.lobby-atmosphere {
+  z-index:1;
+  background:
+    radial-gradient(circle at 55% 48%,color-mix(in srgb,var(--acid) 28%,transparent),transparent 23%),
+    conic-gradient(from 90deg at 54% 58%,transparent,color-mix(in srgb,var(--cyan) 9%,transparent),transparent 24%,transparent 74%,color-mix(in srgb,var(--acid) 8%,transparent),transparent);
+  animation:lobbyBreathe 3.8s ease-in-out infinite;
+}
+.lobby-atmosphere::before {
+  content:"";
+  position:absolute;
+  inset:16% 8% 20%;
+  border:1px solid color-mix(in srgb,var(--cyan) 11%,transparent);
+  clip-path:polygon(12% 0,88% 0,100% 14%,100% 86%,88% 100%,12% 100%,0 86%,0 14%);
+  box-shadow:inset 0 0 42px color-mix(in srgb,var(--cyan) 5%,transparent);
+}
+.lobby-atmosphere::after {
+  content:"";
+  position:absolute;
+  left:10%;right:10%;top:18%;height:2px;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--acid) 65%,white),transparent);
+  box-shadow:0 0 16px color-mix(in srgb,var(--acid) 45%,transparent);
+  animation:lobbySweep 4.6s ease-in-out infinite;
+}
+.lobby-world-portal {
+  position:absolute;
+  z-index:1;
+  top:64px;
+  right:-42px;
+  width:238px;
+  height:238px;
+  overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--cyan) 34%,transparent);
+  border-radius:50%;
+  background:
+    linear-gradient(135deg,color-mix(in srgb,var(--cyan) 10%,transparent),rgba(2,9,12,.2) 45%,rgba(2,8,10,.88)),
+    var(--lobby-bg) center / cover no-repeat;
+  box-shadow:inset 0 0 46px rgba(2,8,10,.86),0 0 27px color-mix(in srgb,var(--cyan) 14%,transparent);
+  opacity:.62;
+  filter:saturate(1.18) contrast(1.08);
+  animation:portalBreathe 5.2s ease-in-out infinite;
+}
+.lobby-world-portal::before,.lobby-world-portal::after {
+  content:"";
+  position:absolute;
+  border-radius:50%;
+  pointer-events:none;
+}
+.lobby-world-portal::before { inset:9px;border:1px dashed color-mix(in srgb,var(--acid) 42%,transparent);animation:portalSpin 19s linear infinite; }
+.lobby-world-portal::after { inset:32px;border:1px solid color-mix(in srgb,var(--cyan) 23%,transparent);box-shadow:0 0 17px color-mix(in srgb,var(--cyan) 12%,transparent); }
+.lobby-world-portal i { position:absolute;left:50%;top:-8%;width:2px;height:116%;transform:rotate(24deg);background:linear-gradient(transparent,color-mix(in srgb,var(--acid) 52%,transparent),transparent);box-shadow:0 0 11px var(--acid);animation:portalSweep 3.8s ease-in-out infinite; }
+.lobby-mission {
+  right:auto;
+  min-width:190px;
+  padding:10px 12px;
+  border-left:2px solid var(--acid);
+  border-radius:0 12px 12px 0;
+  background:linear-gradient(90deg,rgba(3,12,15,.9),rgba(3,12,15,.38),transparent);
+}
+.lobby-mission small { border-color:color-mix(in srgb,var(--acid) 35%,transparent);background:rgba(2,12,13,.72);box-shadow:inset 0 0 12px color-mix(in srgb,var(--acid) 8%,transparent); }
+.lobby-mission strong { font-size:18px;text-shadow:0 3px 16px #000,0 0 18px color-mix(in srgb,var(--acid) 13%,transparent); }
+.lobby-hero {
+  filter:drop-shadow(0 21px 18px rgba(0,0,0,.72)) drop-shadow(0 0 11px color-mix(in srgb,var(--cyan) 15%,transparent));
+  animation:lobbyHeroPresence 3.6s ease-in-out infinite;
+}
+.lobby-loadout {
+  padding:8px 10px;
+  border:1px solid color-mix(in srgb,var(--acid) 16%,transparent);
+  border-right:3px solid var(--acid);
+  border-radius:11px 0 0 11px;
+  background:linear-gradient(90deg,rgba(3,12,15,.28),rgba(3,12,15,.9));
+  box-shadow:0 8px 20px rgba(0,0,0,.28);
+}
+.map-entry-button {
+  overflow:hidden;
+  border-color:color-mix(in srgb,var(--acid) 58%,transparent);
+  background:linear-gradient(125deg,color-mix(in srgb,var(--acid) 13%,var(--ui-raised)),rgba(3,13,16,.95));
+  box-shadow:0 10px 28px rgba(0,0,0,.48),inset 0 0 22px color-mix(in srgb,var(--acid) 8%,transparent),0 0 19px color-mix(in srgb,var(--acid) 12%,transparent);
+}
+.map-entry-button::after {
+  content:"";
+  position:absolute;
+  top:-50%;bottom:-50%;width:24px;left:-36px;
+  transform:rotate(18deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.32),transparent);
+  animation:buttonGlint 4.2s ease-in-out infinite;
+}
+.briefing-grid button,.command-sidebar button {
+  border-color:color-mix(in srgb,var(--cyan) 15%,var(--ui-line));
+  background:linear-gradient(145deg,rgba(14,37,38,.86),rgba(3,13,15,.92));
+  box-shadow:inset 0 1px rgba(255,255,255,.05),0 10px 24px rgba(0,0,0,.3);
+  backdrop-filter:blur(10px);
+}
+.briefing-grid button { position:relative;overflow:hidden; }
+.briefing-grid button::after { content:"";position:absolute;left:0;bottom:0;width:46%;height:1px;background:linear-gradient(90deg,var(--acid),transparent);opacity:.65; }
+.command-sidebar { top:9px;gap:6px; }
+.command-sidebar button { min-height:84px; }
+.command-sidebar i { border:1px solid color-mix(in srgb,var(--acid) 17%,transparent);box-shadow:inset 0 0 14px color-mix(in srgb,var(--acid) 8%,transparent),0 0 12px color-mix(in srgb,var(--acid) 9%,transparent); }
+.home-tabs {
+  overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--cyan) 15%,rgba(255,255,255,.08));
+  background:linear-gradient(90deg,rgba(4,15,18,.96),rgba(11,28,27,.92),rgba(4,15,18,.96));
+  box-shadow:inset 0 1px rgba(255,255,255,.045),0 12px 26px rgba(0,0,0,.36);
+  backdrop-filter:blur(12px);
+}
+.home-tab { position:relative;color:#829b96; }
+.home-tab.active { color:#effff7;background:linear-gradient(180deg,color-mix(in srgb,var(--acid) 13%,transparent),transparent);text-shadow:0 0 12px color-mix(in srgb,var(--acid) 42%,transparent); }
+.home-tab.active::after { content:"";position:absolute;left:20%;right:20%;bottom:0;height:2px;border-radius:3px;background:var(--acid);box-shadow:0 0 10px var(--acid); }
+.home-screen .primary-button { position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.22);box-shadow:0 12px 34px color-mix(in srgb,var(--acid) 24%,transparent),inset 0 1px rgba(255,255,255,.55); }
+
+@keyframes commandScan { 0%,8% { transform:translateY(-30px);opacity:0; } 20% { opacity:.4; } 78% { opacity:.34; } 92%,100% { transform:translateY(720px);opacity:0; } }
+@keyframes commandPlatform { 50% { opacity:.62;transform:translateX(-44%) scale(1.035);filter:brightness(1.22); } }
+@keyframes lobbySweep { 0%,12% { transform:translateY(0);opacity:0; } 27% { opacity:.72; } 78% { opacity:.42; } 92%,100% { transform:translateY(280px);opacity:0; } }
+@keyframes lobbyHeroPresence { 50% { transform:translate(-40%,-45.1%) scale(1.006);filter:drop-shadow(0 23px 19px rgba(0,0,0,.75)) drop-shadow(0 0 15px color-mix(in srgb,var(--cyan) 19%,transparent)); } }
+@keyframes buttonGlint { 0%,55% { left:-36px; } 82%,100% { left:160px; } }
+@keyframes portalBreathe { 50% { opacity:.76;filter:saturate(1.3) contrast(1.12) brightness(1.06); } }
+@keyframes portalSpin { to { transform:rotate(360deg); } }
+@keyframes portalSweep { 0%,12% { left:-8%;opacity:0; } 34% { opacity:.7; } 86%,100% { left:108%;opacity:0; } }
+
 .low-power-device * { backdrop-filter:none !important; }
-.low-power-device .home-glow,.low-power-device .lobby-atmosphere { animation:none !important; }
+.low-power-device .home-glow,.low-power-device .lobby-atmosphere,.low-power-device .home-screen::after,.low-power-device .lobby-stage::after,.low-power-device .lobby-atmosphere::after,.low-power-device .lobby-world-portal,.low-power-device .lobby-world-portal::before,.low-power-device .lobby-world-portal i,.low-power-device .lobby-hero,.low-power-device .map-entry-button::after { animation:none !important; }
 .low-power-device #app { box-shadow:none; }
 .mobile-device .tutorial-card { backdrop-filter:none; }
 .mobile-device :is(.home-glow,.lobby-atmosphere,.opening-keyart) { will-change:auto; }

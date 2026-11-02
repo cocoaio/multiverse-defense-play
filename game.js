@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "79";
+const ASSET_REVISION = "80";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -128,6 +128,7 @@ const battlefieldPatternCache = new WeakMap();
 
 const BOOT_ASSET_SIZES = {
   "./assets/opening-splash-v1.jpg": 642358,
+  "./assets/command-center-v1.webp": 151822,
   "./assets/fallback/city-battlefield-v1.jpg": 328073, "./assets/fallback/cultivation-battlefield-v1.jpg": 370407,
   "./assets/fallback/hospital-battlefield-v1.jpg": 273070, "./assets/fallback/mars-battlefield-v1.jpg": 343644,
   "./assets/fallback/moon-battlefield-v1.jpg": 429205, "./assets/fallback/orbit-battlefield-v1.jpg": 313647,
