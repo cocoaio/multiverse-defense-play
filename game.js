@@ -1600,6 +1600,7 @@ function makeGame(runType = "main") {
     comboTimer: 0,
     shake: 0,
     bossShock: 0,
+    cinematicImpact: null,
     flash: 0,
     bossSpawned: false,
     lastBossWave: 0,
@@ -2741,6 +2742,71 @@ function getBossImpactSpec(sceneId = game.scene.id) {
   }[sceneId] || { name: "毁灭轰击", scar: "ruins", color: "#ff684f", particle: "shard" };
 }
 
+function triggerCinematicImpact(x, y, color, intensity = 1, duration = .78) {
+  game.cinematicImpact = {
+    x,
+    y,
+    color,
+    intensity: Math.max(.35, Math.min(1.45, intensity)),
+    time: duration,
+    maxTime: duration,
+  };
+  game.flash = Math.max(game.flash, .2 * intensity);
+  game.bossShock = Math.max(game.bossShock, .48 * intensity);
+  game.shake = Math.max(game.shake, preferences.reduceMotion ? 0 : 12 + intensity * 8);
+}
+
+function createTerrainDeformation(x, y, radius, options = {}) {
+  const spec = getBossImpactSpec(options.sceneId || game.scene.id);
+  const source = options.source || "ultimate";
+  const intensity = options.intensity ?? 1;
+  const requestedLife = options.life || (source === "weapon" ? 12 : source === "boss" ? 78 : 52);
+  const life = game.performance.quality < .65 ? requestedLife * .58 : requestedLife;
+  const minimumSpacing = source === "weapon" ? radius * .72 : radius * .38;
+  const nearby = game.bossScars.find((scar) => scar.source === source && Math.hypot(scar.x - x, scar.y - y) < minimumSpacing);
+  if (nearby) {
+    nearby.radius = Math.min(radius * 1.24, Math.max(nearby.radius, radius) * 1.06);
+    nearby.life = Math.max(nearby.life, life);
+    nearby.age = Math.min(nearby.age, .32);
+  } else {
+    game.bossScars.push({
+      x,
+      y,
+      radius: radius * rand(.92, 1.08),
+      rotation: rand(-Math.PI, Math.PI),
+      seed: rand(1, 999),
+      type: options.type || spec.scar,
+      sceneId: options.sceneId || game.scene.id,
+      source,
+      color: options.color || spec.color,
+      intensity,
+      age: 0,
+      life,
+      maxLife: life,
+    });
+  }
+  const scarLimit = game.performance.quality < .65 ? 12 : 22;
+  if (game.bossScars.length > scarLimit) game.bossScars.splice(0, game.bossScars.length - scarLimit);
+  if (source !== "weapon") {
+    const color = options.color || spec.color;
+    const rings = intensity > 1.05 ? 4 : 3;
+    for (let ring = 0; ring < rings; ring += 1) {
+      game.shockwaves.push({
+        x,
+        y,
+        radius: 8 + ring * 11,
+        maxRadius: radius * (.68 + ring * .34),
+        life: .5 + ring * .17,
+        maxLife: .5 + ring * .17,
+        color: ring === 1 ? "#ffffff" : color,
+        lineWidth: Math.max(2, 8 - ring * 1.3),
+        ellipse: .62 + ring * .07,
+      });
+    }
+    if (options.cinematic !== false) triggerCinematicImpact(x, y, color, intensity, .68 + intensity * .16);
+  }
+}
+
 function updateEnemies(dt) {
   for (const enemy of game.enemies) {
     if (enemy.dead) continue;
@@ -2865,18 +2931,14 @@ function updateEnemyProjectiles(dt) {
 }
 
 function createBossScar(warning) {
-  game.bossScars.push({
-    x: warning.x,
-    y: warning.y,
-    radius: warning.radius * rand(.88, 1.08),
-    rotation: rand(-Math.PI, Math.PI),
-    seed: rand(1, 999),
+  createTerrainDeformation(warning.x, warning.y, warning.radius, {
     type: warning.scarType,
     sceneId: warning.sceneId,
-    life: 75,
-    maxLife: 75,
+    color: warning.color,
+    source: "boss",
+    intensity: 1.2,
+    life: 78,
   });
-  if (game.bossScars.length > 18) game.bossScars.splice(0, game.bossScars.length - 18);
 }
 
 function updateBossWarnings(dt) {
@@ -2887,9 +2949,7 @@ function updateBossWarnings(dt) {
       warning.detonated = true;
       warning.life = .68;
       createBossScar(warning);
-      game.shockwaves.push({ x: warning.x, y: warning.y, radius: 8, maxRadius: warning.radius + 18, life: .72, color: warning.color });
-      game.shockwaves.push({ x: warning.x, y: warning.y, radius: 18, maxRadius: warning.radius * .72, life: .48, color: "#ffffff" });
-      makeDirectionalParticles(warning.x, warning.y, warning.color, 42, 290, -Math.PI / 2, Math.PI, warning.particleShape);
+      makeDirectionalParticles(warning.x, warning.y, warning.color, 56, 340, -Math.PI / 2, Math.PI, warning.particleShape);
       if (Math.hypot(game.player.x - warning.x, game.player.y - warning.y) <= warning.radius + 13) damagePlayer(warning.damage, warning.x, warning.y, true);
       game.shake = Math.max(game.shake, 19);
       game.bossShock = .78;
@@ -3102,6 +3162,7 @@ function explode(x, y, directTarget) {
   const burstColor = game.scene.id === "city" || game.scene.id === "mars" ? "#ffb34f" : game.scene.colors.shot;
   const impactAngle = Math.atan2(y - game.player.y, x - game.player.x);
   game.shockwaves.push({ x, y, radius: 3, maxRadius: radius, life: 0.3, color: burstColor });
+  if (radius >= 62 && Math.random() < .38) createTerrainDeformation(x, y, Math.min(48, radius * .52), { source: "weapon", intensity: .32, life: 10, color: burstColor });
   makeDirectionalParticles(x, y, burstColor, 15, 190, impactAngle, 1.28, game.scene.id === "snow" ? "shard" : "spark");
   game.shake = Math.max(game.shake, 4);
   for (const enemy of queryNearbyEnemies(x, y, radius + 82)) {
@@ -3142,6 +3203,7 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
   if (!lightweight && (critical || ["serum", "plasma", "tesla", "graviton", "cryo"].includes(bullet.fx))) {
     game.shockwaves.push({ x, y, radius: 2, maxRadius: critical ? 34 : 22, life: .25, color: critical ? "#fff47a" : bullet.color });
   }
+  if (critical && !lightweight) createTerrainDeformation(x, y, 28, { source: "weapon", intensity: .28, life: 7, color: "#fff47a" });
   if (bullet.divineWeapon && (!lightweight || Math.random() < .34)) {
     const definition = divineGearDefinitions[bullet.divineClass] || divineGearDefinitions.ranger;
     makeDirectionalParticles(x, y, definition.primary, lightweight ? 2 : 7, 155, angle, bullet.divineClass === "mage" ? 1.8 : .72, bullet.divineClass === "mage" ? "glyph" : "spark");
@@ -3174,11 +3236,13 @@ function detonateAirstrike(strike) {
   const radius = type === "railSalvo" ? 138 : type === "swarmProtocol" ? 82 : 112;
   damageUltimateArea(strike.x, strike.y, radius, type === "railSalvo" ? 7.1 : 6.1, type === "railSalvo" ? 3.8 : 3.2, 38);
   const color = type === "antibodyRain" ? "#72ffd0" : type === "marsBarrage" ? "#ff8350" : type === "auroraSpears" ? "#bdefff" : game.player.combatClass.color;
-  game.shockwaves.push({ x: strike.x, y: strike.y, radius: 8, maxRadius: radius + 12, life: .58, color });
-  makeParticles(strike.x, strike.y, color, 28, 260);
-  makeParticles(strike.x, strike.y, type === "antibodyRain" ? "#effff9" : type === "swordRain" ? "#efffea" : "#ffdb7a", 17, 205);
+  const terrainIntensity = type === "railSalvo" || type === "marsBarrage" ? .88 : .62;
+  if (game.performance.quality > .62 || Math.random() < .52) createTerrainDeformation(strike.x, strike.y, radius * .72, { source: "barrage", intensity: terrainIntensity, life: 28, color, cinematic: !game.cinematicImpact });
+  game.shockwaves.push({ x: strike.x, y: strike.y, radius: 8, maxRadius: radius + 24, life: .64, color, lineWidth: 6, ellipse: .7 });
+  makeParticles(strike.x, strike.y, color, 36, 320);
+  makeParticles(strike.x, strike.y, type === "antibodyRain" ? "#effff9" : type === "swordRain" ? "#efffea" : "#ffdb7a", 24, 245);
   if (type === "auroraSpears") for (const enemy of game.enemies) if (Math.hypot(enemy.x - strike.x, enemy.y - strike.y) < radius) enemy.slowTimer = Math.max(enemy.slowTimer, 3.5);
-  game.shake = Math.max(game.shake, type === "railSalvo" || type === "marsBarrage" ? 13 : 9);
+  game.shake = Math.max(game.shake, type === "railSalvo" || type === "marsBarrage" ? 17 : 11);
   tone(88, .09, "sawtooth", .035, .55);
 }
 
@@ -3200,6 +3264,7 @@ function activatePulse() {
   };
   if (type === "galaxyOverdrive") {
     game.ultimate = { type, family: "orbit", variant: player.combatClass.fx, x: player.x, y: player.y, time: 4.5, maxTime: 4.5 };
+    createTerrainDeformation(player.x, player.y, 170, { source: "ultimate", intensity: 1.12, life: 42, color: player.combatClass.color });
     tone(86, .42, "sine", .07, 3.2);
   } else if (impactTypes.has(type)) {
     const target = game.enemies.find((enemy) => enemy.type === "boss" && !enemy.dead)
@@ -3409,16 +3474,17 @@ function updateEffects(dt) {
       ultimate.triggered = true;
       const radius = 215;
       damageUltimateArea(ultimate.x, ultimate.y, radius, 8.5, 4.35, 82);
-      for (const ring of [90, 155, radius]) game.shockwaves.push({ x: ultimate.x, y: ultimate.y, radius: 8, maxRadius: ring, life: .72, color: ultimateColor });
-      makeParticles(ultimate.x, ultimate.y, ultimateColor, 46, 310);
-      game.shake = 19;
+      createTerrainDeformation(ultimate.x, ultimate.y, radius, { source: "ultimate", intensity: 1.35, life: 58, color: ultimateColor });
+      makeParticles(ultimate.x, ultimate.y, ultimateColor, 72, 410);
+      game.shake = 24;
       tone(72, .22, "sawtooth", .07, .42);
     }
     if (ultimate.family === "field" && !ultimate.triggered && ultimate.time <= 1.45) {
       ultimate.triggered = true;
       damageUltimateArea(ultimate.x, ultimate.y, 420, 7.25, 3.85, 58);
-      for (const radius of [135, 260, 390, 455]) game.shockwaves.push({ x: ultimate.x, y: ultimate.y, radius: 18, maxRadius: radius, life: 1.05, color: ultimateColor });
-      makeParticles(ultimate.x, ultimate.y, ultimateColor, 64, 360);
+      createTerrainDeformation(ultimate.x, ultimate.y, 285, { source: "ultimate", intensity: 1.28, life: 54, color: ultimateColor });
+      for (const radius of [190, 320, 455]) game.shockwaves.push({ x: ultimate.x, y: ultimate.y, radius: 18, maxRadius: radius, life: 1.05, maxLife: 1.05, color: ultimateColor, lineWidth: 7, ellipse: .72 });
+      makeParticles(ultimate.x, ultimate.y, ultimateColor, 82, 430);
       if (ultimate.type === "thunderTribulation" || ultimate.type === "teslaStorm") {
         for (const enemy of game.enemies.filter((entry) => !entry.dead).slice(0, 12)) game.lightnings.push({ x: enemy.x, y: enemy.y, life: .45, maxLife: .45, seed: rand(0, 99) });
       }
@@ -3463,7 +3529,11 @@ function updateEffects(dt) {
     burst.life -= dt;
   }
   for (const mark of game.groundMarks) mark.life -= dt;
-  for (const scar of game.bossScars) scar.life -= dt;
+  for (const scar of game.bossScars) { scar.life -= dt; scar.age = (scar.age || 0) + dt; }
+  if (game.cinematicImpact) {
+    game.cinematicImpact.time -= dt;
+    if (game.cinematicImpact.time <= 0) game.cinematicImpact = null;
+  }
   game.particles = game.particles.filter((particle) => particle.life > 0);
   game.floaters = game.floaters.filter((floater) => floater.life > 0);
   game.shockwaves = game.shockwaves.filter((wave) => wave.life > 0);
@@ -4235,6 +4305,7 @@ function render() {
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
+    drawCinematicImpactOverlay();
     drawBossScreenShock();
     drawMovementGuide();
     drawBanner();
@@ -4261,6 +4332,45 @@ function drawBossScreenShock() {
   ctx.globalAlpha = .15 * strength;
   ctx.fillStyle = game.scene.colors.hit;
   for (let y = 0; y < H; y += 18) ctx.fillRect((y % 36 ? -1 : 1) * strength * 10, y, W, 3);
+  ctx.restore();
+}
+
+function drawCinematicImpactOverlay() {
+  const impact = game.cinematicImpact;
+  if (!impact) return;
+  const progress = 1 - impact.time / impact.maxTime;
+  const attack = Math.min(1, progress / .16);
+  const decay = Math.max(0, 1 - Math.max(0, progress - .12) / .88);
+  const strength = attack * decay * impact.intensity;
+  const zoom = game.camera?.zoom || 1;
+  const x = W / 2 + (impact.x - game.player.x) * zoom;
+  const y = H / 2 + (impact.y - game.player.y) * zoom;
+  const rays = game.performance.quality < .65 ? 8 : 16;
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  const flash = ctx.createRadialGradient(x, y, 3, x, y, 70 + progress * 390);
+  flash.addColorStop(0, colorAlpha("#ffffff", .48 * strength));
+  flash.addColorStop(.13, colorAlpha(impact.color, .32 * strength));
+  flash.addColorStop(.58, colorAlpha(impact.color, .08 * strength));
+  flash.addColorStop(1, colorAlpha(impact.color, 0));
+  ctx.fillStyle = flash; ctx.fillRect(0, 0, W, H);
+  ctx.translate(x, y);
+  ctx.rotate(progress * .12);
+  for (let index = 0; index < rays; index += 1) {
+    const angle = index / rays * Math.PI * 2 + scarNoise(index + 17, index) * .12;
+    const length = (120 + scarNoise(index, 41) * 260) * (1 + progress * .7);
+    ctx.save(); ctx.rotate(angle);
+    const ray = ctx.createLinearGradient(26, 0, length, 0);
+    ray.addColorStop(0, colorAlpha("#ffffff", .5 * strength));
+    ray.addColorStop(.28, colorAlpha(impact.color, .22 * strength));
+    ray.addColorStop(1, colorAlpha(impact.color, 0));
+    ctx.fillStyle = ray;
+    ctx.beginPath(); ctx.moveTo(18, -1.5); ctx.lineTo(length, -8); ctx.lineTo(length, 8); ctx.lineTo(18, 1.5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  ctx.strokeStyle = colorAlpha("#ffffff", .72 * strength);
+  ctx.lineWidth = 2 + strength * 8;
+  ctx.beginPath(); ctx.arc(0, 0, 24 + progress * 330, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 
@@ -4534,11 +4644,15 @@ function drawBattlefield() {
   for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
   for (const wave of game.shockwaves) {
     if (!isWorldPointVisible(wave.x, wave.y, wave.radius + 24)) continue;
+    ctx.save();
+    ctx.translate(wave.x, wave.y);
     ctx.beginPath();
-    ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, wave.radius, wave.radius * (wave.ellipse || 1), 0, 0, Math.PI * 2);
     ctx.strokeStyle = colorAlpha(wave.color, Math.min(0.8, wave.life * 1.6));
-    ctx.lineWidth = wave.color === "#66f5d2" ? 5 : 3;
+    ctx.lineWidth = wave.lineWidth || (wave.color === "#66f5d2" ? 5 : 3);
+    if (wave.lineWidth >= 6 && game.performance.quality > .58) { ctx.shadowColor = wave.color; ctx.shadowBlur = 12; }
     ctx.stroke();
+    ctx.restore();
   }
 
   for (const mark of game.groundMarks) if (isWorldPointVisible(mark.x, mark.y, 28)) drawGroundMark(mark);
@@ -4746,6 +4860,31 @@ function drawBossScar(scar) {
     ctx.strokeStyle = "rgba(255,219,123,.74)"; ctx.lineWidth = 3; ctx.shadowColor = "#ffe191"; ctx.shadowBlur = 9;
     for (let i = 0; i < 3; i += 1) { ctx.beginPath(); ctx.arc(0, 0, r * (.24 + i * .18), i * .55, i * .55 + Math.PI * 1.45); ctx.stroke(); }
     for (let i = 0; i < 8; i += 1) { const a = i / 8 * Math.PI * 2; ctx.save(); ctx.translate(Math.cos(a) * r * .55, Math.sin(a) * r * .37); ctx.rotate(a); ctx.fillStyle = "rgba(255,231,155,.8)"; ctx.fillRect(-5, -2, 10, 4); ctx.restore(); }
+  }
+  const age = scar.age || 0;
+  const ignition = Math.max(0, 1 - age / (scar.source === "weapon" ? 1.1 : 4.2));
+  if (ignition > 0) {
+    const glowColor = scar.color || getBossImpactSpec(scar.sceneId).color;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = ignition * (.42 + (scar.intensity || 1) * .24);
+    ctx.strokeStyle = glowColor;
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 12 + ignition * 22;
+    ctx.lineWidth = Math.max(2, r * .024);
+    const veins = game.performance.quality < .65 ? 6 : 11;
+    for (let index = 0; index < veins; index += 1) {
+      const angle = index / veins * Math.PI * 2 + scarNoise(scar.seed, index) * .38;
+      const pulse = .72 + Math.sin(ambienceTime * 8 + index * 1.7) * .12;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * r * .16, Math.sin(angle) * r * .1);
+      ctx.lineTo(Math.cos(angle + .12) * r * .44 * pulse, Math.sin(angle + .12) * r * .29 * pulse);
+      ctx.lineTo(Math.cos(angle - .05) * r * (.68 + scarNoise(scar.seed, index + 40) * .24), Math.sin(angle - .05) * r * (.43 + scarNoise(scar.seed, index + 40) * .18));
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1.5, r * .012);
+    ctx.beginPath(); ctx.ellipse(0, 0, r * (.46 + age * .18), r * (.29 + age * .09), 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -7387,10 +7526,25 @@ if (QA_MODE) {
       synergy: game.player.activeSynergy?.synergy || null,
       boss: game.boss ? game.boss.hp : null,
       divine: { active: game.divineTrialActive, awakening: game.divineAwakening, bullets: game.bullets.filter((bullet) => bullet.divineWeapon).length },
+      terrainFx: {
+        scars: game.bossScars.length,
+        latestType: game.bossScars.at(-1)?.type || null,
+        latestSource: game.bossScars.at(-1)?.source || null,
+        cinematic: Boolean(game.cinematicImpact),
+        shockwaves: game.shockwaves.length,
+      },
     } : { mode },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
     grantLevel: () => { if (game) gainXp(game.player.xpNeeded); },
     forceDeath: () => { if (game) { game.health = 0; handlePlayerDeath(); } },
+    forceUltimateImpact: () => {
+      if (!game) return;
+      game.pulseTimer = 0;
+      activatePulse();
+      if (game.ultimate?.family === "impact") game.ultimate.time = 1.04;
+      else if (game.ultimate?.family === "field") game.ultimate.time = 1.44;
+      else if (game.ultimate?.family === "barrage") for (const strike of game.airstrikes) strike.delay = Math.min(strike.delay, .08);
+    },
   };
 }
 
