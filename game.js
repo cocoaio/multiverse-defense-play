@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "80";
+const ASSET_REVISION = "81";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -118,6 +118,7 @@ const orbitShipAtlas = createAssetImage("./assets/posters/original/orbit-ships-v
 const marsHeroAtlas = createAssetImage("./assets/posters/original/mars-heroes-v1.webp", false, "./assets/fallback/posters/original/mars-heroes-v1.png");
 const moonHeroAtlas = createAssetImage("./assets/posters/original/moon-heroes-v1.webp", false, "./assets/fallback/posters/original/moon-heroes-v1.png");
 const companionAtlas = createAssetImage("./assets/companions-v1.png", false);
+const themeVfxAtlas = createAssetImage("./assets/theme-vfx-atlas-v1.webp", false);
 const battlefieldTextures = { city: cityBattlefield, snow: snowBattlefield, hospital: hospitalBattlefield, orbit: orbitBattlefield, mars: marsBattlefield, moon: moonBattlefield, cultivation: cultivationBattlefield };
 const sceneHeroAtlases = { city: cityHeroAtlas, snow: snowHeroAtlas, hospital: hospitalHeroAtlas, orbit: orbitShipAtlas, mars: marsHeroAtlas, moon: moonHeroAtlas, cultivation: cultivatorHeroAtlas };
 const heroClassIds = ["melee", "ranger", "mage"];
@@ -135,13 +136,14 @@ const BOOT_ASSET_SIZES = {
   "./assets/fallback/snow-battlefield-v1.jpg": 330866, "./assets/fallback/enemy-worlds-v1.png": 84805,
   "./assets/fallback/city-zombies-v2.png": 89224, "./assets/fallback/cultivator-enemies-v3.png": 92419,
   "./assets/companions-v1.png": 126258,
+  "./assets/theme-vfx-atlas-v1.webp": 571302,
   "./assets/characters/city/melee.png": 210289, "./assets/characters/city/ranger.png": 168452, "./assets/characters/city/mage.png": 215336,
   "./assets/characters/snow/melee.png": 186842, "./assets/characters/snow/ranger.png": 148178, "./assets/characters/snow/mage.png": 167037,
   "./assets/characters/hospital/melee.png": 138859, "./assets/characters/hospital/ranger.png": 120009, "./assets/characters/hospital/mage.png": 141436,
   "./assets/characters/orbit/melee.png": 116728, "./assets/characters/orbit/ranger.png": 84694, "./assets/characters/orbit/mage.png": 123872,
   "./assets/characters/mars/melee.png": 219892, "./assets/characters/mars/ranger.png": 179968, "./assets/characters/mars/mage.png": 201433,
   "./assets/characters/moon/melee.png": 217666, "./assets/characters/moon/ranger.png": 155638, "./assets/characters/moon/mage.png": 178939,
-  "./assets/characters/cultivation/melee.png": 212568, "./assets/characters/cultivation/ranger.png": 224886, "./assets/characters/cultivation/mage.png": 241044,
+  "./assets/characters/cultivation/melee.png": 62394, "./assets/characters/cultivation/ranger.png": 64961, "./assets/characters/cultivation/mage.png": 69844,
 };
 
 const bootAssetTargets = new Map([
@@ -152,6 +154,7 @@ const bootAssetTargets = new Map([
   ["./assets/fallback/cultivation-battlefield-v1.jpg", cultivationBattlefield], ["./assets/fallback/enemy-worlds-v1.png", enemyAtlas],
   ["./assets/fallback/city-zombies-v2.png", cityZombieAtlas], ["./assets/fallback/cultivator-enemies-v3.png", cultivatorEnemyAtlas],
   ["./assets/companions-v1.png", companionAtlas],
+  ["./assets/theme-vfx-atlas-v1.webp", themeVfxAtlas],
   ...sceneIds.flatMap((sceneId) => heroClassIds.map((classId) => [`./assets/characters/${sceneId}/${classId}.png`, sceneHeroSprites[sceneId][classId]])),
 ]);
 
@@ -669,6 +672,23 @@ const impactMaterialProfiles = {
   moon: { material: "ceramic", color: "#d8d4ff", debris: "chip" },
   cultivation: { material: "spirit", color: "#ddffe4", debris: "glyph" },
 };
+
+// Theme is the first visual decision; class only changes how that theme is
+// delivered. Every normal attack, impact and terrain mark reads from this
+// table so worlds never collapse back into the same rings with new colours.
+const themeCombatProfiles = {
+  city: { atlas: 0, name: "废城动能", primary: "#ff9a52", secondary: "#ff4d37", motif: "rubble", scar: "ruins" },
+  snow: { atlas: 1, name: "极光冰裂", primary: "#dffbff", secondary: "#72dfff", motif: "frost", scar: "snowCrater" },
+  hospital: { atlas: 2, name: "抗体裂解", primary: "#9affdf", secondary: "#3bd9bd", motif: "helix", scar: "bioBreach" },
+  orbit: { atlas: 3, name: "星舰磁轨", primary: "#dce9ff", secondary: "#668cff", motif: "starlance", scar: "hullBreach" },
+  mars: { atlas: 4, name: "赤星熔断", primary: "#ffd078", secondary: "#ff5d35", motif: "magma", scar: "moltenCrater" },
+  moon: { atlas: 5, name: "月尘引潮", primary: "#eeeaff", secondary: "#a27bff", motif: "gravity", scar: "lunarCrater" },
+  cultivation: { atlas: 6, name: "太虚墨剑", primary: "#fff0ae", secondary: "#63e8b0", motif: "ink", scar: "spiritRift" },
+};
+
+function getThemeCombatProfile(sceneId = game?.scene?.id || "city") {
+  return themeCombatProfiles[sceneId] || themeCombatProfiles.city;
+}
 
 const hitReactionSoundProfiles = {
   slash: { frequency: 185, type: "sawtooth", duration: .072, endMultiplier: .42 },
@@ -1998,6 +2018,7 @@ function makeGame(runType = "main") {
     lastRangerFinisher: null,
     rangerFinisherCooldown: 0,
     lastEvolutionScarAt: -99,
+    lastThemeScarAt: -99,
     combo: 0,
     comboTimer: 0,
     shake: 0,
@@ -3221,6 +3242,7 @@ function shoot() {
       derivedProcName: derivedAttack.proc ? getDerivedProcName(player.derivedStyle) : null,
       derivedProcInterval: derivedAttack.interval,
       classId: combatClass.id,
+      themeId: game.scene.id,
       trail: [],
       age: 0,
       hits: new Set(),
@@ -3238,8 +3260,14 @@ function shoot() {
   const muzzleX = originX + Math.cos(baseAngle) * 38;
   const muzzleY = originY + Math.sin(baseAngle) * 38;
   if (combatClass.id !== "melee") {
-    game.shockwaves.push({ x: muzzleX, y: muzzleY, radius: 2, maxRadius: 20, life: .18, color: combatClass.color });
-    makeDirectionalParticles(muzzleX, muzzleY, combatClass.color, weapon.id === "starbreaker" ? 10 : 4, weapon.id === "starbreaker" ? 150 : 85, baseAngle + Math.PI, .62, "spark");
+    const theme = getThemeCombatProfile();
+    game.impactBursts.push({
+      x: muzzleX, y: muzzleY, color: theme.primary, accent: theme.secondary,
+      fx: "themeMuzzle", angle: baseAngle, sceneId: game.scene.id,
+      classId: combatClass.id, muzzle: true, life: .24, maxLife: .24,
+      critical: false, seed: game.elapsed + attackId * .17,
+    });
+    makeDirectionalParticles(muzzleX, muzzleY, theme.secondary, weapon.id === "starbreaker" ? 10 : 4, weapon.id === "starbreaker" ? 150 : 85, baseAngle + Math.PI, .62, theme.motif === "frost" ? "shard" : theme.motif === "ink" || theme.motif === "helix" ? "glyph" : "spark");
   }
   if (divineActive) spawnDivineMuzzleFx(muzzleX, muzzleY, baseAngle, combatClass.id, divineDefinition);
   game.shake = Math.max(game.shake, combatClass.id === "melee" ? 2.4 : weapon.id === "starbreaker" ? 3.2 : 1.1);
@@ -4299,6 +4327,19 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
       intensity: .22,
       life: LOW_POWER_DEVICE ? 4 : 6.5,
       color: bullet.evolutionColor || bullet.color,
+      cinematic: false,
+    });
+  }
+  const theme = getThemeCombatProfile(bullet.themeId || game.scene.id);
+  const themeScarReady = critical || bullet.contactAttack || bullet.explosive || bullet.derivedProc;
+  if (!lightweight && themeScarReady && game.elapsed - game.lastThemeScarAt >= (LOW_POWER_DEVICE ? 1.45 : .68)) {
+    game.lastThemeScarAt = game.elapsed;
+    createTerrainDeformation(x, y, bullet.contactAttack ? 38 : critical ? 32 : 27, {
+      source: "weapon",
+      type: theme.scar,
+      intensity: critical ? .42 : .29,
+      life: LOW_POWER_DEVICE ? 4.5 : 8.5,
+      color: theme.secondary,
       cinematic: false,
     });
   }
@@ -7654,6 +7695,61 @@ function drawLunarEnemy(enemy, s, frozen) {
   if(enemy.type==="boss"||enemy.type==="splitter"){ctx.fillStyle=colorAlpha(game.scene.colors.shot,.65);for(let i=0;i<5;i+=1){const a=i/5*Math.PI*2;ctx.beginPath();ctx.moveTo(Math.cos(a)*s*.55,Math.sin(a)*s*.55);ctx.lineTo(Math.cos(a)*s*1.15,Math.sin(a)*s*1.15);ctx.lineTo(Math.cos(a+.18)*s*.62,Math.sin(a+.18)*s*.62);ctx.fill();}}
 }
 
+function drawThemeAtlasCell(sceneId, size, alpha = 1, rotation = 0) {
+  if (!isAssetRenderable(themeVfxAtlas)) { ensureImageLoaded(themeVfxAtlas); return false; }
+  const profile = getThemeCombatProfile(sceneId);
+  const cellWidth = themeVfxAtlas.naturalWidth / 4;
+  const cellHeight = themeVfxAtlas.naturalHeight / 2;
+  const column = profile.atlas % 4;
+  const row = Math.floor(profile.atlas / 4);
+  ctx.save();
+  ctx.rotate(rotation);
+  ctx.globalAlpha *= alpha;
+  // Preserve the pigment and dry-brush values from the atlas. Additive blend
+  // turns pale paper texture into a white blob on bright maps.
+  ctx.globalCompositeOperation = "source-over";
+  const rendered = drawImageSafe(themeVfxAtlas, column * cellWidth, row * cellHeight, cellWidth, cellHeight, -size / 2, -size / 2, size, size);
+  ctx.restore();
+  return rendered;
+}
+
+function drawThemeProjectileSignature(bullet) {
+  const theme = getThemeCombatProfile(bullet.themeId || game.scene.id);
+  const age = bullet.age || 0;
+  const radius = 7 + Math.min(9, (bullet.size || 3) * .38);
+  ctx.save();
+  ctx.globalCompositeOperation = game.performance.quality > .52 ? "lighter" : "source-over";
+  ctx.strokeStyle = colorAlpha(theme.primary, .86);
+  ctx.fillStyle = colorAlpha(theme.secondary, .7);
+  ctx.lineWidth = 1.4;
+  if (theme.motif === "rubble") {
+    for (const y of [-5, 0, 5]) { ctx.beginPath(); ctx.moveTo(-radius * 2.2, y); ctx.lineTo(radius * 1.1, y * .22); ctx.stroke(); }
+    ctx.fillRect(radius * .2, -2, radius * 1.1, 4);
+  } else if (theme.motif === "frost") {
+    for (let arm = 0; arm < 4; arm += 1) { ctx.save(); ctx.rotate(arm * Math.PI / 2 + age); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius, 0); ctx.lineTo(radius * .64, -radius * .28); ctx.stroke(); ctx.restore(); }
+  } else if (theme.motif === "helix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let step = -4; step <= 4; step += 1) { const x = step / 4 * radius * 1.45; const y = Math.sin(step * 1.05 + phase + age * 7) * radius * .34; if (step === -4) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (theme.motif === "starlance") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.8, 0); ctx.lineTo(-radius * .35, -radius * .45); ctx.lineTo(radius * .1, 0); ctx.lineTo(-radius * .35, radius * .45); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#ffffff"; ctx.beginPath(); ctx.moveTo(-radius * 1.8, 0); ctx.lineTo(radius * 1.3, 0); ctx.stroke();
+  } else if (theme.motif === "magma") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.45, 0); ctx.quadraticCurveTo(0, -radius, -radius * 1.3, -radius * .28); ctx.quadraticCurveTo(-radius * .4, 0, -radius * 1.3, radius * .48); ctx.quadraticCurveTo(0, radius * .72, radius * 1.45, 0); ctx.fill();
+  } else if (theme.motif === "gravity") {
+    for (let ring = 0; ring < 3; ring += 1) { ctx.save(); ctx.rotate(age * (ring % 2 ? -2 : 2) + ring); ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 3, radius * (.22 + ring * .05), 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+  } else {
+    ctx.lineCap = "round"; ctx.lineWidth = 3.4; ctx.beginPath(); ctx.arc(-radius * .28, 0, radius * 1.3, -.86, .86); ctx.stroke();
+    ctx.lineWidth = 1.1; for (const offset of [-5, 0, 5]) { ctx.beginPath(); ctx.moveTo(-radius * 1.2, offset); ctx.lineTo(radius * 1.5, offset * .55); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+function drawThemeImpactTexture(burst, progress, alpha) {
+  const sceneId = burst.sceneId || game.scene.id;
+  const scale = burst.muzzle ? 42 : burst.critical ? 118 : burst.contactAttack ? 102 : 78;
+  const reveal = Math.sin(Math.min(1, progress * 1.4) * Math.PI);
+  drawThemeAtlasCell(sceneId, scale * (.82 + progress * .42), alpha * reveal * (burst.muzzle ? .34 : .46), (burst.seed || .1) * .23 - progress * .12);
+}
+
 function drawProjectileTrail(bullet) {
   if (!bullet.trail?.length) return;
   const evolutionTier = bullet.evolutionTier || 0;
@@ -7779,6 +7875,7 @@ function drawBullet(bullet) {
   } else {
     ctx.beginPath(); ctx.arc(0, 0, bullet.explosive ? 5.2 : 3.4, 0, Math.PI * 2); ctx.fill();
   }
+  drawThemeProjectileSignature(bullet);
   drawProjectileEvolutionCoating(bullet);
   if (bullet.divineWeapon) drawDivineProjectileCoating(bullet);
   ctx.restore();
@@ -7985,6 +8082,14 @@ function drawImpactBurst(burst) {
   if (burst.derivedProc) ctx.scale(1.28, 1.28);
   if (evolutionTier > 0) ctx.scale(1 + evolutionTier * .13, 1 + evolutionTier * .13);
   ctx.globalAlpha = alpha; ctx.lineCap = "round";
+  drawThemeImpactTexture(burst, progress, alpha);
+  if (burst.muzzle) {
+    const theme = getThemeCombatProfile(burst.sceneId);
+    ctx.strokeStyle = colorAlpha(theme.primary, alpha * .9); ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(-18 - progress * 8, -5); ctx.quadraticCurveTo(2, 0, 25 + progress * 20, 0); ctx.quadraticCurveTo(2, 0, -18 - progress * 8, 5); ctx.stroke();
+    ctx.restore();
+    return;
+  }
   if (game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
   else if (game.showcase) ctx.globalCompositeOperation = "lighter";
   ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(1, 0, 7 * (1 - progress) + 2, 12 * (1 - progress) + 2, 0, 0, Math.PI * 2); ctx.fill();
@@ -8426,39 +8531,33 @@ function drawUltimateEffect() {
 
 function drawAttackTimingAccent(player, eased) {
   if (eased < .08) return;
+  const theme = getThemeCombatProfile();
   const classId = player.combatClass.id;
-  const color = player.combatClass.color;
-  const sceneAccent = {
-    city: "#ffd86b", snow: "#dffbff", hospital: "#eafff8", orbit: "#8cecff",
-    mars: "#ffb164", moon: "#dcd9ff", cultivation: "#fff0a8",
-  }[game.scene.id] || color;
-  ctx.save();
-  ctx.globalCompositeOperation = game.performance.quality > .58 ? "lighter" : "source-over";
-  if (classId === "melee" || (game.scene.endless && classId === "ranger")) {
-    if (game.scene.id === "orbit") { ctx.restore(); return; }
-    const sweep = .55 + eased * .55;
-    ctx.strokeStyle = colorAlpha(sceneAccent, .26 + eased * .55);
-    ctx.lineWidth = 3.5 + eased * 3;
-    ctx.beginPath(); ctx.arc(4, 0, 72 + eased * 17, -sweep, sweep); ctx.stroke();
-    ctx.strokeStyle = colorAlpha("#ffffff", .38 + eased * .46); ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(4, 0, 79 + eased * 20, -sweep * .86, sweep * .74); ctx.stroke();
-  } else if (classId === "ranger") {
-    const muzzleX = 40 + eased * 13;
-    ctx.fillStyle = colorAlpha(sceneAccent, .34 + eased * .56);
-    ctx.beginPath(); ctx.moveTo(muzzleX + 22, 0); ctx.lineTo(muzzleX, -10); ctx.lineTo(muzzleX + 6, 0); ctx.lineTo(muzzleX, 10); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = colorAlpha("#ffffff", .45 + eased * .4); ctx.lineWidth = 1.4;
-    for (const offset of [-7, 0, 7]) { ctx.beginPath(); ctx.moveTo(muzzleX + 13, offset * .35); ctx.lineTo(muzzleX + 48 + eased * 20, offset); ctx.stroke(); }
+  const anchorX = classId === "melee" ? 47 : 60 + eased * 7;
+  const brushSize = classId === "melee" ? 185 : classId === "ranger" ? 132 : 152;
+  ctx.save(); ctx.translate(anchorX, 0);
+  drawThemeAtlasCell(game.scene.id, brushSize * (.86 + eased * .16), (.1 + eased * .28) * (LOW_POWER_DEVICE ? .72 : 1), classId === "mage" ? ambienceTime * .08 : 0);
+  ctx.globalCompositeOperation = game.performance.quality > .52 ? "lighter" : "source-over";
+  ctx.strokeStyle = colorAlpha(theme.primary, .55 + eased * .4); ctx.fillStyle = colorAlpha(theme.secondary, .58 + eased * .3); ctx.lineWidth = 2;
+  const r = 18 + eased * 10;
+  if (theme.motif === "rubble") {
+    for (let chip = 0; chip < 5; chip += 1) { ctx.save(); ctx.rotate((chip - 2) * .25); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r * 1.8, -3); ctx.lineTo(r * 1.15, 4); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (theme.motif === "frost") {
+    for (let arm = 0; arm < 6; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r, 0); ctx.lineTo(r * .64, -r * .25); ctx.moveTo(r * .64, 0); ctx.lineTo(r * .82, r * .22); ctx.stroke(); }
+  } else if (theme.motif === "helix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let step = -6; step <= 6; step += 1) { const x = step / 6 * r * 1.5; const y = Math.sin(step * .78 + phase + ambienceTime * 5) * r * .45; if (step === -6) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (theme.motif === "starlance") {
+    ctx.beginPath(); ctx.moveTo(r * 2.1, 0); ctx.lineTo(-r * .5, -r * .48); ctx.lineTo(0, 0); ctx.lineTo(-r * .5, r * .48); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#ffffff"; for (const y of [-7, 0, 7]) { ctx.beginPath(); ctx.moveTo(-r * 2, y); ctx.lineTo(r * 1.55, y * .2); ctx.stroke(); }
+  } else if (theme.motif === "magma") {
+    ctx.beginPath(); ctx.moveTo(r * 1.7, 0); ctx.quadraticCurveTo(r * .25, -r * 1.15, -r * 1.4, -r * .28); ctx.quadraticCurveTo(-r * .35, 0, -r * 1.4, r * .58); ctx.quadraticCurveTo(r * .35, r, r * 1.7, 0); ctx.fill();
+  } else if (theme.motif === "gravity") {
+    for (let ring = 0; ring < 3; ring += 1) { ctx.save(); ctx.rotate(ambienceTime * (ring % 2 ? -.9 : 1.1) + ring); ctx.beginPath(); ctx.ellipse(0, 0, r + ring * 8, r * (.25 + ring * .06), 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
   } else {
-    const castX = 50 + eased * 10;
-    ctx.save(); ctx.translate(castX, 0); ctx.rotate(ambienceTime * 2.7);
-    ctx.strokeStyle = colorAlpha(sceneAccent, .45 + eased * .45); ctx.lineWidth = 1.8;
-    const radius = 21 + eased * 8;
-    ctx.beginPath();
-    for (let i = 0; i <= 6; i += 1) { const angle = i * Math.PI / 3; if (!i) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); }
-    ctx.stroke();
-    ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 3; i += 1) { const angle = i / 3 * Math.PI * 2; ctx.beginPath(); ctx.arc(Math.cos(angle) * radius, Math.sin(angle) * radius, 2.2, 0, Math.PI * 2); ctx.fill(); }
-    ctx.restore();
+    ctx.strokeStyle = colorAlpha(theme.secondary, .9); ctx.lineCap = "round"; ctx.lineWidth = 5 + eased * 3;
+    ctx.beginPath(); ctx.moveTo(-r * 1.4, r * .62); ctx.quadraticCurveTo(0, -r * 1.4, r * 2.2, -r * .22); ctx.stroke();
+    ctx.strokeStyle = colorAlpha(theme.primary, .86); ctx.lineWidth = 1.4;
+    for (const y of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(-r * 1.3, y); ctx.lineTo(r * 1.9, y * .38); ctx.stroke(); }
   }
   ctx.restore();
 }
@@ -10175,6 +10274,16 @@ if (QA_MODE) {
         invulnerable: Number(game.invulnerable.toFixed(2)),
       },
       combatClass: game.player.combatClass.id,
+      themeCombat: {
+        id: game.scene.id,
+        name: getThemeCombatProfile().name,
+        motif: getThemeCombatProfile().motif,
+        atlasCell: getThemeCombatProfile().atlas,
+        atlasState: themeVfxAtlas.dataset.assetState || "unknown",
+        themedBullets: game.bullets.filter((bullet) => bullet.themeId === game.scene.id).length,
+        themedImpacts: game.impactBursts.filter((burst) => burst.sceneId === game.scene.id).length,
+        terrainMarked: game.lastThemeScarAt > -90,
+      },
       projectileEvolution: {
         ...getProjectileEvolutionState(game.player),
         signature: getActiveEvolutionSignatureProfile(game.scene.id, game.player.combatClass.id, game.player),
@@ -10252,6 +10361,15 @@ if (QA_MODE) {
       if (game.ultimate?.family === "impact") game.ultimate.time = 1.04;
       else if (game.ultimate?.family === "field") game.ultimate.time = 1.44;
       else if (game.ultimate?.family === "barrage") for (const strike of game.airstrikes) strike.delay = Math.min(strike.delay, .08);
+    },
+    forceThemeImpact: () => {
+      if (!game) return;
+      const theme = getThemeCombatProfile();
+      const x = game.player.x + 72;
+      const y = game.player.y - 8;
+      game.impactBursts.push({ x, y, color: theme.primary, accent: theme.secondary, fx: game.player.combatClass.fx, angle: 0, sceneId: game.scene.id, classId: game.player.combatClass.id, life: .48, maxLife: .48, critical: true, seed: game.elapsed + .31 });
+      game.lastThemeScarAt = game.elapsed;
+      createTerrainDeformation(x, y, 34, { source: "weapon", type: theme.scar, color: theme.secondary, intensity: .42, life: 8, cinematic: false });
     },
     forceHeroFallback: (active = true) => {
       if (!game) return;

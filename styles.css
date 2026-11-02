@@ -1574,6 +1574,25 @@ h1 {
 @keyframes portalSpin { to { transform:rotate(360deg); } }
 @keyframes portalSweep { 0%,12% { left:-8%;opacity:0; } 34% { opacity:.7; } 86%,100% { left:108%;opacity:0; } }
 
+/* v81: lock the xianxia poster to its feet, never to the source atlas crop. */
+#app[data-scene="cultivation"] .lobby-hero.hero-single-sprite {
+  top:auto;
+  bottom:44px;
+  width:min(220px,66%);
+  height:min(350px,74%);
+  transform:translateX(-40%);
+  background-size:contain!important;
+  background-position:center bottom!important;
+  animation:cultivationHeroPresence 3.8s ease-in-out infinite;
+}
+#app[data-scene="cultivation"] .scene-hero.hero-single-sprite {
+  background-size:contain!important;
+  background-position:center bottom!important;
+}
+@keyframes cultivationHeroPresence {
+  50% { transform:translateX(-40%) translateY(-2px) scale(1.006);filter:drop-shadow(0 23px 19px rgba(0,0,0,.75)) drop-shadow(0 0 15px color-mix(in srgb,var(--cyan) 19%,transparent)); }
+}
+
 .low-power-device * { backdrop-filter:none !important; }
 .low-power-device .home-glow,.low-power-device .lobby-atmosphere,.low-power-device .home-screen::after,.low-power-device .lobby-stage::after,.low-power-device .lobby-atmosphere::after,.low-power-device .lobby-world-portal,.low-power-device .lobby-world-portal::before,.low-power-device .lobby-world-portal i,.low-power-device .lobby-hero,.low-power-device .map-entry-button::after { animation:none !important; }
 .low-power-device #app { box-shadow:none; }
