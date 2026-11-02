@@ -2,17 +2,41 @@
   "name": "多元防线",
   "short_name": "多元防线",
   "description": "跨越城市、雪原、医院与星球的竖屏 Roguelike 割草游戏",
+  "id": "./",
   "start_url": "./",
+  "scope": "./",
+  "lang": "zh-CN",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "background_color": "#050b08",
   "theme_color": "#09130f",
   "orientation": "portrait-primary",
+  "categories": ["games", "entertainment"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "./assets/app-icons/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/app-icons/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/app-icons/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

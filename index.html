@@ -4,8 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#09130f" />
+    <meta name="application-name" content="多元防线" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="多元防线" />
+    <meta name="format-detection" content="telephone=no" />
     <meta name="description" content="多元防线：跨越城市、雪原、医院与星球的竖屏 Roguelike 割草游戏。" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="多元防线 · 微信即点即玩" />
@@ -14,6 +18,8 @@
     <meta property="og:image" content="https://multiverse-defense-play.fullunull.chatgpt.site/assets/opening-splash-v1.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./assets/app-icons/apple-touch-icon-180.png?v=60" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./assets/app-icons/app-icon-192.png?v=60" />
     <link rel="icon" href="./icon.svg" />
     <title>多元防线</title>
     <script>
@@ -27,7 +33,7 @@
       if (mobile) document.documentElement.classList.add("mobile-device");
       if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=59" />
+    <link rel="stylesheet" href="./styles.css?v=60" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -47,7 +53,7 @@
           <button id="loadingRetry" class="loading-retry">重新加载失败资源</button>
           <button id="loadingContinue" class="loading-continue">以兼容画面进入 <small>缺失素材将在后台补载</small></button>
         </div>
-        <a class="offline-download" href="./downloads/multiverse-defense-offline-v59.zip" download>下载本地试玩包 <small>v59 · 弱网备用</small></a>
+        <a class="offline-download" href="./downloads/multiverse-defense-offline-v60.zip" download>下载本地试玩包 <small>v60 · 弱网备用</small></a>
       </section>
 
       <section id="loginScreen" class="screen login-screen" aria-label="登录多元防线">
@@ -395,6 +401,6 @@
       </section>
     </main>
 
-    <script defer src="./game.js?v=59"></script>
+    <script defer src="./game.js?v=60"></script>
   </body>
 </html>
