@@ -2743,6 +2743,10 @@ function getBossImpactSpec(sceneId = game.scene.id) {
 }
 
 function triggerCinematicImpact(x, y, color, intensity = 1, duration = .78) {
+  if (preferences.reduceMotion) {
+    intensity = Math.min(.42, intensity * .32);
+    duration = Math.min(.42, duration * .55);
+  }
   game.cinematicImpact = {
     x,
     y,
@@ -2751,8 +2755,8 @@ function triggerCinematicImpact(x, y, color, intensity = 1, duration = .78) {
     time: duration,
     maxTime: duration,
   };
-  game.flash = Math.max(game.flash, .2 * intensity);
-  game.bossShock = Math.max(game.bossShock, .48 * intensity);
+  game.flash = Math.max(game.flash, (preferences.reduceMotion ? .08 : .2) * intensity);
+  game.bossShock = Math.max(game.bossShock, (preferences.reduceMotion ? .12 : .48) * intensity);
   game.shake = Math.max(game.shake, preferences.reduceMotion ? 0 : 12 + intensity * 8);
 }
 
@@ -4311,7 +4315,8 @@ function render() {
     drawBanner();
     drawDivineAwakeningOverlay();
     if (game.flash > 0) {
-      ctx.fillStyle = `rgba(${game.health <= 0 ? "255,55,45" : "138,255,211"},${game.flash * 0.25})`;
+      const flashAlpha = game.flash * (preferences.reduceMotion ? .065 : .25);
+      ctx.fillStyle = `rgba(${game.health <= 0 ? "255,55,45" : "138,255,211"},${flashAlpha})`;
       ctx.fillRect(0, 0, W, H);
     }
   } else {
@@ -4320,7 +4325,7 @@ function render() {
 }
 
 function drawBossScreenShock() {
-  if (!game.bossShock) return;
+  if (!game.bossShock || preferences.reduceMotion) return;
   const strength = Math.min(1, game.bossShock / .78);
   ctx.save();
   ctx.globalCompositeOperation = "screen";
@@ -4341,11 +4346,12 @@ function drawCinematicImpactOverlay() {
   const progress = 1 - impact.time / impact.maxTime;
   const attack = Math.min(1, progress / .16);
   const decay = Math.max(0, 1 - Math.max(0, progress - .12) / .88);
-  const strength = attack * decay * impact.intensity;
+  const comfortScale = preferences.reduceMotion ? .34 : 1;
+  const strength = attack * decay * impact.intensity * comfortScale;
   const zoom = game.camera?.zoom || 1;
   const x = W / 2 + (impact.x - game.player.x) * zoom;
   const y = H / 2 + (impact.y - game.player.y) * zoom;
-  const rays = game.performance.quality < .65 ? 8 : 16;
+  const rays = preferences.reduceMotion ? 3 : game.performance.quality < .65 ? 8 : 16;
   ctx.save();
   ctx.globalCompositeOperation = "screen";
   const flash = ctx.createRadialGradient(x, y, 3, x, y, 70 + progress * 390);
@@ -7532,6 +7538,12 @@ if (QA_MODE) {
         latestSource: game.bossScars.at(-1)?.source || null,
         cinematic: Boolean(game.cinematicImpact),
         shockwaves: game.shockwaves.length,
+      },
+      accessibilityFx: {
+        reduceMotion: preferences.reduceMotion,
+        impactIntensity: game.cinematicImpact ? Number(game.cinematicImpact.intensity.toFixed(2)) : 0,
+        bossShock: Number(game.bossShock.toFixed(2)),
+        renderedShake: preferences.reduceMotion ? 0 : Number(game.shake.toFixed(2)),
       },
     } : { mode },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
