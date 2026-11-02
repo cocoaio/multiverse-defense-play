@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "69";
+const ASSET_REVISION = "70";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -639,6 +639,16 @@ const bossDefeatProfiles = {
   cultivation: { title: "道域破灭", detail: "宗主剑轮尽碎，残余灵气回归修士", mode: "ascend", color: "#ddffe4" },
 };
 
+const corpseDeathProfiles = {
+  city: { mode: "gore", color: "#9d4d43" },
+  snow: { mode: "freeze", color: "#c9f5ff" },
+  hospital: { mode: "lysis", color: "#8bffd1" },
+  orbit: { mode: "wreck", color: "#83eaff" },
+  mars: { mode: "ember", color: "#ff8d55" },
+  moon: { mode: "depower", color: "#d8d4ff" },
+  cultivation: { mode: "spirit", color: "#ddffe4" },
+};
+
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
 }
@@ -653,6 +663,10 @@ function getBossSignature(sceneId = game?.scene?.id || "city") {
 
 function getBossDefeatProfile(sceneId = game?.scene?.id || "city") {
   return bossDefeatProfiles[sceneId] || bossDefeatProfiles.city;
+}
+
+function getCorpseDeathProfile(sceneId = game?.scene?.id || "city") {
+  return corpseDeathProfiles[sceneId] || corpseDeathProfiles.city;
 }
 
 const cultivationDomains = [
@@ -3667,6 +3681,8 @@ function killEnemy(enemy) {
   }
   if (!bossVictoryReady) {
     if (game.corpses.length >= EFFECT_LIMITS.corpses) game.corpses.shift();
+    const deathProfile = getCorpseDeathProfile();
+    const impactAngle = Number.isFinite(enemy.hitAngle) ? enemy.hitAngle : Math.atan2(enemy.y - game.player.y, enemy.x - game.player.x);
     game.corpses.push({
       x: enemy.x,
       y: enemy.y,
@@ -3675,6 +3691,12 @@ function killEnemy(enemy) {
       color: enemy.color,
       sceneId: game.scene.id,
       rotation: rand(-.45, .45),
+      impactAngle,
+      deathMode: deathProfile.mode,
+      deathColor: deathProfile.color,
+      poseRendered: false,
+      residueRendered: false,
+      model: { ...enemy, dead: false, hp: enemy.maxHp, shield: 0, flash: 0, hitKick: 0, bossReaction: 0, attackWindup: 0, attackWindupMax: 0, attackRecovery: 0 },
       life: enemy.type === "boss" ? 6 : 4.2,
       maxLife: enemy.type === "boss" ? 6 : 4.2,
       seed: Math.random() * 100,
@@ -6169,49 +6191,94 @@ function drawSceneProp(sceneId, x, y, hash, gx, gy) {
   ctx.restore();
 }
 
+function drawCorpsePose(corpse, progress, alpha) {
+  const enemy = corpse.model;
+  if (!enemy || alpha <= 0) return;
+  corpse.poseRendered = true;
+  const s = corpse.size;
+  const heavy = corpse.type === "tank" || corpse.type === "boss";
+  const fall = Math.sin(Math.min(1, progress) * Math.PI / 2);
+  const mechanical = ["wreck", "depower"].includes(corpse.deathMode);
+  const spirit = corpse.deathMode === "spirit";
+  const lysis = corpse.deathMode === "lysis";
+  const motionScale = preferences.reduceMotion ? .28 : 1;
+  const force = (heavy ? .32 : .62) * s * fall * motionScale;
+  const fallAngle = mechanical ? 1.12 : spirit ? -.18 : lysis ? .36 : .78;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(corpse.x + Math.cos(corpse.impactAngle) * force, corpse.y + Math.sin(corpse.impactAngle) * force + (spirit ? -s * fall * .42 : s * fall * .28));
+  ctx.rotate(corpse.rotation * .25 + fall * fallAngle * motionScale * (Math.cos(corpse.impactAngle) >= 0 ? 1 : -1));
+  if (lysis) ctx.scale(1 + fall * .18, 1 - fall * .38);
+  else ctx.scale(1 - fall * .06, 1 - fall * (heavy ? .18 : .27));
+  if (corpse.sceneId === "cultivation") drawCultivationEnemy(enemy, s, false);
+  else if (corpse.sceneId === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, false);
+  else if (enemyAtlas.complete && enemyAtlas.naturalWidth) drawAtlasEnemy(enemy, s, false);
+  else {
+    if (corpse.sceneId === "city" || corpse.sceneId === "snow") drawHumanoidEnemy(enemy, s, false, corpse.sceneId === "snow");
+    if (corpse.sceneId === "hospital") drawPathogenEnemy(enemy, s, false);
+    if (corpse.sceneId === "orbit") drawVoidEnemy(enemy, s, false);
+    if (corpse.sceneId === "mars") drawMartianEnemy(enemy, s, false);
+    if (corpse.sceneId === "moon") drawLunarEnemy(enemy, s, false);
+  }
+  if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
+  ctx.restore();
+}
+
 function drawCorpse(corpse) {
   const fade = Math.min(1, corpse.life / 1.35);
-  const dissolve = 1 - corpse.life / corpse.maxLife;
+  const progress = 1 - corpse.life / corpse.maxLife;
+  const dissolve = Math.max(0, progress);
   const s = corpse.size;
+  const poseEnd = LOW_POWER_DEVICE ? .085 : .16;
+  const poseAlpha = 1 - Math.max(0, Math.min(1, (progress - poseEnd * .58) / (poseEnd * .42)));
+  const residueAlpha = Math.max(0, Math.min(1, (progress - poseEnd * .48) / (poseEnd * .42)));
+  drawCorpsePose(corpse, Math.min(1, progress / poseEnd), poseAlpha * fade);
+  if (residueAlpha <= 0) return;
+  corpse.residueRendered = true;
+  const mass = corpse.type === "tank" || corpse.type === "boss" ? 1.24 : corpse.type === "runner" || corpse.type === "mini" ? .78 : 1;
   ctx.save();
-  ctx.globalAlpha = fade * .86;
+  ctx.globalAlpha = fade * .88 * residueAlpha;
   ctx.translate(corpse.x, corpse.y + s * .65);
   ctx.rotate(corpse.rotation);
 
-  if (corpse.sceneId === "city" || corpse.sceneId === "snow") {
-    const flesh = corpse.sceneId === "snow" ? "#6e91a0" : "#763c36";
-    ctx.fillStyle = "rgba(80,16,15,.38)";
-    ctx.beginPath(); ctx.ellipse(0, 3, s * 1.15, s * .34, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = flesh;
-    ctx.beginPath(); ctx.ellipse(-s * .28, -2, s * .56, s * .28, -.25, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(s * .54, -2, s * .24, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = shade(flesh, 24); ctx.lineWidth = Math.max(2, s * .13); ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(-s * .55, -2); ctx.lineTo(-s * .95, -s * .18); ctx.moveTo(s * .05, 2); ctx.lineTo(s * .45, s * .28); ctx.stroke();
+  if (corpse.sceneId === "city") {
+    const flesh = corpse.type === "tank" ? "#6b302d" : "#873f38";
+    ctx.fillStyle = "rgba(82,9,11,.44)"; ctx.beginPath(); ctx.ellipse(0, 4, s * 1.18 * mass, s * .35, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = flesh; ctx.beginPath(); ctx.ellipse(-s * .25, -2, s * .58 * mass, s * .28, -.25, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s * .52 * mass, -2, s * .22, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#d1b49b"; ctx.lineWidth = Math.max(1.5, s * .08); ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-s * .5, -2); ctx.lineTo(-s * .92 * mass, -s * .2); ctx.moveTo(s * .02, 1); ctx.lineTo(s * .46 * mass, s * .27); ctx.stroke();
+  } else if (corpse.sceneId === "snow") {
+    ctx.fillStyle = "rgba(105,184,211,.27)"; ctx.beginPath(); ctx.ellipse(0, 5, s * 1.16 * mass, s * .34, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#9fcbd7"; ctx.beginPath(); ctx.ellipse(-s*.18,0,s*.55*mass,s*.27,-.18,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#e7fbff";
+    for (let index = 0; index < 5; index += 1) { const angle = corpse.seed + index * 1.7; const radius = s * (.35 + index % 2 * .34); ctx.save(); ctx.translate(Math.cos(angle)*radius, Math.sin(angle)*radius*.45); ctx.rotate(angle); ctx.beginPath(); ctx.moveTo(0,-s*.22);ctx.lineTo(s*.1,s*.12);ctx.lineTo(-s*.09,s*.1);ctx.closePath();ctx.fill();ctx.restore(); }
   } else if (corpse.sceneId === "hospital") {
-    ctx.fillStyle = colorAlpha(corpse.color, .48);
-    ctx.beginPath(); ctx.ellipse(0, 2, s * 1.05, s * .42, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = colorAlpha(game.scene.colors.shot, .38); ctx.lineWidth = 1.4;
-    for (let i = 0; i < 7; i += 1) { const a = i / 7 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(a) * s * .45, Math.sin(a) * s * .15); ctx.lineTo(Math.cos(a) * s, Math.sin(a) * s * .38); ctx.stroke(); }
+    ctx.fillStyle = colorAlpha(corpse.color, .5); ctx.beginPath(); ctx.ellipse(0, 2, s * 1.08 * mass, s * .43, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = colorAlpha(corpse.deathColor, .55); ctx.lineWidth = 1.5;
+    for (let index = 0; index < 8; index += 1) { const angle = index / 8 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(angle)*s*.38,Math.sin(angle)*s*.14);ctx.lineTo(Math.cos(angle)*s*(.85+mass*.16),Math.sin(angle)*s*.4);ctx.stroke(); }
+    ctx.fillStyle = colorAlpha("#d9fff2", .48); for (let index=0;index<4;index+=1){ctx.beginPath();ctx.arc(Math.cos(index*1.8)*s*.62,Math.sin(index*1.8)*s*.2,s*(.07+index*.01),0,Math.PI*2);ctx.fill();}
   } else if (["orbit", "moon"].includes(corpse.sceneId)) {
-    ctx.fillStyle = shade(corpse.color, -28);
-    ctx.beginPath(); ctx.moveTo(-s, s * .18); ctx.lineTo(-s * .25, -s * .35); ctx.lineTo(s * .15, 0); ctx.lineTo(s * .82, -s * .18); ctx.lineTo(s * .42, s * .35); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "#ff9a55"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-s * .18, -s * .1); ctx.lineTo(s * .08, s * .15); ctx.stroke();
+    ctx.fillStyle = shade(corpse.color, corpse.sceneId === "moon" ? -12 : -28); ctx.beginPath(); ctx.moveTo(-s*mass,s*.18);ctx.lineTo(-s*.25,-s*.35);ctx.lineTo(s*.15,0);ctx.lineTo(s*.82*mass,-s*.18);ctx.lineTo(s*.42,s*.35);ctx.closePath();ctx.fill();
+    ctx.strokeStyle = corpse.sceneId === "moon" ? "#a8cbff" : "#ff9a55"; ctx.lineWidth = 2; ctx.beginPath();ctx.moveTo(-s*.38,-s*.12);ctx.lineTo(-s*.05,s*.14);ctx.lineTo(s*.18,-s*.08);ctx.lineTo(s*.46,s*.18);ctx.stroke();
+    ctx.fillStyle = colorAlpha(corpse.deathColor, .65); ctx.beginPath();ctx.arc(s*.05,0,s*.09,0,Math.PI*2);ctx.fill();
+  } else if (corpse.sceneId === "mars") {
+    ctx.fillStyle = "rgba(85,28,22,.42)"; ctx.beginPath();ctx.ellipse(0,4,s*1.12*mass,s*.35,0,0,Math.PI*2);ctx.fill();
+    for (let index=0;index<5;index+=1){const angle=corpse.seed+index*1.42;const radius=s*(.18+index*.16);ctx.save();ctx.translate(Math.cos(angle)*radius,Math.sin(angle)*radius*.42);ctx.rotate(angle);ctx.fillStyle=index%2?"#713b2d":"#a95736";ctx.fillRect(-s*.2,-s*.11,s*.4,s*.22);ctx.strokeStyle="#ff8b47";ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(-s*.12,0);ctx.lineTo(s*.12,0);ctx.stroke();ctx.restore();}
   } else if (corpse.sceneId === "cultivation") {
-    ctx.strokeStyle = colorAlpha(corpse.color, .72); ctx.lineWidth = Math.max(2, s * .12);
-    ctx.beginPath(); ctx.arc(0, 0, s * (.8 - dissolve * .3), Math.PI * .08, Math.PI * .92); ctx.stroke();
-    ctx.fillStyle = colorAlpha(game.scene.colors.shot, .38); ctx.beginPath(); ctx.ellipse(0, 4, s, s * .24, 0, 0, Math.PI * 2); ctx.fill();
-  } else {
-    ctx.fillStyle = colorAlpha(corpse.color, .55); ctx.beginPath(); ctx.ellipse(0, 2, s, s * .34, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = shade(corpse.color, -30); ctx.fillRect(-s * .7, -s * .12, s * .5, s * .24); ctx.fillRect(s * .12, -s * .2, s * .62, s * .28);
+    ctx.fillStyle = colorAlpha(corpse.color, .24); ctx.beginPath();ctx.ellipse(0,4,s*mass,s*.23,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle = colorAlpha(corpse.deathColor, .78); ctx.lineWidth = Math.max(2, s*.1); ctx.beginPath();ctx.arc(0,0,s*(.82-dissolve*.32),Math.PI*.08,Math.PI*.92);ctx.stroke();
+    ctx.strokeStyle = colorAlpha("#fff1b8", .72);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-s*.72,s*.13);ctx.lineTo(s*.68,-s*.14);ctx.moveTo(s*.34,-s*.24);ctx.lineTo(s*.58,s*.2);ctx.stroke();
   }
 
   const dissolveParticles = game.performance.quality < .6 ? 3 : 8;
-  for (let i = 0; i < dissolveParticles; i += 1) {
-    const a = corpse.seed + i * 2.17;
-    const distance = s * (.25 + dissolve * (1.1 + (i % 3) * .25));
-    ctx.globalAlpha = fade * (1 - i / 11);
-    ctx.fillStyle = corpse.sceneId === "city" ? "#984943" : corpse.color;
-    ctx.beginPath(); ctx.arc(Math.cos(a) * distance, Math.sin(a) * distance - dissolve * s * .6, Math.max(1, s * .045), 0, Math.PI * 2); ctx.fill();
+  for (let index = 0; index < dissolveParticles; index += 1) {
+    const angle = corpse.seed + index * 2.17;
+    const distance = s * (.25 + dissolve * (1.1 + (index % 3) * .25));
+    ctx.globalAlpha = fade * residueAlpha * (1 - index / 11);
+    ctx.fillStyle = corpse.deathColor || corpse.color;
+    if (["freeze", "wreck", "depower", "ember"].includes(corpse.deathMode)) { ctx.save();ctx.translate(Math.cos(angle)*distance,Math.sin(angle)*distance-dissolve*s*.6);ctx.rotate(angle+dissolve*4);ctx.fillRect(-s*.04,-s*.09,s*.08,s*.18);ctx.restore(); }
+    else { ctx.beginPath();ctx.arc(Math.cos(angle)*distance,Math.sin(angle)*distance-dissolve*s*(corpse.deathMode==="spirit"?1.15:.6),Math.max(1,s*.045),0,Math.PI*2);ctx.fill(); }
   }
   ctx.restore();
 }
@@ -8785,6 +8852,14 @@ if (QA_MODE) {
       realm: game.scene.endless ? getRealmName(game.player.level) : null,
       lives: game.lives,
       corpses: game.corpses.length,
+      corpseStates: game.corpses.slice(-8).map((corpse) => ({
+        sceneId: corpse.sceneId,
+        type: corpse.type,
+        deathMode: corpse.deathMode,
+        progress: Number((1 - corpse.life / corpse.maxLife).toFixed(2)),
+        poseRendered: Boolean(corpse.poseRendered),
+        residueRendered: Boolean(corpse.residueRendered),
+      })),
       xpDrops: game.xpDrops.length,
       gearDrops: game.gearDrops.length,
       lootCount: game.loot.length,
