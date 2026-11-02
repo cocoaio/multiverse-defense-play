@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "60";
+const ASSET_REVISION = "61";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -826,6 +826,7 @@ if (meta.gearSystemVersion !== 2) {
 refreshDailyState();
 refreshPetProgression();
 saveMeta();
+let selectedSkinPreviewId = skinDefinitions.some((skin) => skin.id === meta.skins.equipped) ? meta.skins.equipped : "default";
 let game = null;
 let mode = QA_MODE || ADMIN_MODE ? "home" : "login";
 let paused = false;
@@ -4034,8 +4035,9 @@ function renderCommandSidebar() {
   ui.skinRailBadge.classList.toggle("ready", !meta.skins.owned.includes("jade_avatar"));
 }
 
-function retentionItem({ icon, color = "var(--acid)", name, detail, progress, action, label, disabled = false, secondary = false, swatch = null }) {
-  return `<article class="retention-item" style="--item-color:${color}">${swatch || `<i>${icon}</i>`}<div class="retention-copy"><b>${name}</b><small>${detail}</small>${progress ? `<div class="retention-progress"><i style="width:${progress}%"></i></div>` : ""}</div><button data-retention-action="${action}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : ""}>${label}</button></article>`;
+function retentionItem({ icon, color = "var(--acid)", name, detail, progress, action, label, disabled = false, secondary = false, swatch = null, previewAction = null, selectedPreview = false }) {
+  const previewButton = previewAction ? `<button data-skin-preview-action="${previewAction}" class="skin-preview-button ${selectedPreview ? "active" : ""}" aria-pressed="${selectedPreview}">${selectedPreview ? "试演中" : "试演"}</button>` : "";
+  return `<article class="retention-item ${selectedPreview ? "preview-selected" : ""}" style="--item-color:${color};--skin-a:${color}">${swatch || `<i>${icon}</i>`}<div class="retention-copy"><b>${name}</b><small>${detail}</small>${progress ? `<div class="retention-progress"><i style="width:${progress}%"></i></div>` : ""}</div><div class="retention-actions">${previewButton}<button data-retention-action="${action}" class="${secondary ? "secondary" : ""}" ${disabled ? "disabled" : ""}>${label}</button></div></article>`;
 }
 
 function openRetentionPanel(panel = "daily") {
@@ -4111,19 +4113,47 @@ function beginPetDungeon() {
   showToast("今日灵宠试炼次数已用完");
 }
 
+function renderSkinPreviewStage(skin) {
+  const motif = skin.motif || "pure";
+  const tierText = skin.tier ? `视觉层级 ${"Ⅰ".repeat(skin.tier)}` : "原生纯色";
+  const orbitCount = Math.max(1, skin.tier * 2);
+  const ornaments = Array.from({ length: orbitCount }, (_, index) => `<i style="--orbit-index:${index};--orbit-count:${orbitCount}"></i>`).join("");
+  return `<section class="skin-preview-stage motif-${motif} tier-${skin.tier}" data-skin-preview-id="${skin.id}" style="--skin-a:${skin.primary};--skin-b:${skin.secondary}">
+    <div class="skin-preview-viewport" aria-hidden="true">
+      <span class="skin-preview-horizon"></span>
+      <span class="skin-preview-ray ray-a"></span><span class="skin-preview-ray ray-b"></span>
+      <span class="skin-preview-ring ring-a"></span><span class="skin-preview-ring ring-b"></span><span class="skin-preview-ring ring-c"></span>
+      <span class="skin-preview-ornaments">${ornaments}</span>
+      <span class="skin-preview-core"><i></i></span><span class="skin-preview-impact"></span>
+    </div>
+    <div class="skin-preview-caption"><span>ULTIMATE EFFECT · LIVE PREVIEW</span><b>${skin.name}</b><small>${skin.detail} · ${tierText}</small></div>
+    <em>仅试演外观，不扣补给币、不自动装备</em>
+  </section>`;
+}
+
 function renderSkinsPanel() {
-  ui.retentionContent.innerHTML = `<div class="retention-summary"><b>大招装扮 · 不增加数值</b><p>原生蓝无附加装扮；价格越高，光层、粒子与释放纹样越丰富。主题装扮同时作为下一战区通行证。</p></div>` + skinDefinitions.map((skin) => {
+  const previewSkin = skinDefinitions.find((skin) => skin.id === selectedSkinPreviewId) || skinDefinitions[0];
+  selectedSkinPreviewId = previewSkin.id;
+  ui.retentionContent.innerHTML = `${renderSkinPreviewStage(previewSkin)}<div class="retention-summary"><b>大招装扮 · 先试演再决定</b><p>点击任意装扮的“试演”可免费查看完整层级；试演不会扣币或改变当前装备。原生蓝保持纯净，高阶装扮逐层增加光环、粒子与主题纹样。</p></div>` + skinDefinitions.map((skin) => {
     const owned = meta.skins.owned.includes(skin.id);
     const equipped = meta.skins.equipped === skin.id;
     const label = equipped ? "使用中" : owned ? "装备" : skin.price == null ? "活动获取" : `◆${skin.price}`;
     const tierLabel = skin.tier ? ` · 特效 ${"★".repeat(skin.tier)}` : " · 纯色";
-    return retentionItem({ swatch: `<span class="skin-swatch" style="--skin-a:${skin.primary};--skin-b:${skin.secondary}"></span>`, name: skin.name, detail: `${skin.detail}${tierLabel}`, action: `skin:${skin.id}`, label, disabled: equipped || (!owned && skin.price == null), secondary: owned && !equipped });
+    return retentionItem({ color: skin.primary, swatch: `<span class="skin-swatch" style="--skin-a:${skin.primary};--skin-b:${skin.secondary}"></span>`, name: skin.name, detail: `${skin.detail}${tierLabel}`, action: `skin:${skin.id}`, label, disabled: equipped || (!owned && skin.price == null), secondary: owned && !equipped, previewAction: skin.id, selectedPreview: selectedSkinPreviewId === skin.id });
   }).join("");
   bindRetentionActions();
 }
 
 function bindRetentionActions() {
   ui.retentionContent.querySelectorAll("[data-retention-action]").forEach((button) => button.addEventListener("click", () => handleRetentionAction(button.dataset.retentionAction)));
+  ui.retentionContent.querySelectorAll("[data-skin-preview-action]").forEach((button) => button.addEventListener("click", () => {
+    const skin = skinDefinitions.find((entry) => entry.id === button.dataset.skinPreviewAction);
+    if (!skin) return;
+    selectedSkinPreviewId = skin.id;
+    renderSkinsPanel();
+    const card = ui.retentionContent.closest(".retention-card");
+    if (card) card.scrollTop = 0;
+  }));
 }
 
 function handleRetentionAction(action) {
@@ -4149,6 +4179,7 @@ function handleRetentionAction(action) {
     if (meta.skins.owned.includes(id)) meta.skins.equipped = id;
     else if (skin.price != null && meta.coins >= skin.price) { meta.coins -= skin.price; meta.skins.owned.push(id); meta.skins.equipped = id; }
     else { showToast(skin.price == null ? "请从活动中心免费解锁" : `还差 ◆${Math.max(0, skin.price - meta.coins)}`); return; }
+    selectedSkinPreviewId = skin.id;
     saveMeta(); renderSkinsPanel(); renderHome(); showToast(`已装备 ${skin.name}`);
   }
 }
@@ -7672,6 +7703,7 @@ if (QA_MODE) {
       synergy: game.player.activeSynergy?.synergy || null,
       boss: game.boss ? game.boss.hp : null,
       divine: { active: game.divineTrialActive, awakening: game.divineAwakening, bullets: game.bullets.filter((bullet) => bullet.divineWeapon).length },
+      cosmetics: { equipped: meta.skins.equipped, owned: [...meta.skins.owned], preview: selectedSkinPreviewId, coins: meta.coins },
       terrainFx: {
         scars: game.bossScars.length,
         latestType: game.bossScars.at(-1)?.type || null,
@@ -7685,7 +7717,7 @@ if (QA_MODE) {
         bossShock: Number(game.bossShock.toFixed(2)),
         renderedShake: preferences.reduceMotion ? 0 : Number(game.shake.toFixed(2)),
       },
-    } : { mode },
+    } : { mode, cosmetics: { equipped: meta.skins.equipped, owned: [...meta.skins.owned], preview: selectedSkinPreviewId, coins: meta.coins } },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
     grantLevel: () => { if (game) gainXp(game.player.xpNeeded); },
     forceDeath: () => { if (game) { game.health = 0; handlePlayerDeath(); } },
