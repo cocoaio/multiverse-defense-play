@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "74";
+const ASSET_REVISION = "75";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -1667,6 +1667,30 @@ function getUpgradePresentation(definition) {
   return game.scene.endless ? cultivationUpgradeNames[definition.id] || classPresentation || definition : classPresentation || definition;
 }
 
+function getProjectileEvolutionLabel(tier) {
+  return ["制式", "聚能", "超载", "质变"][Math.max(0, Math.min(3, tier))];
+}
+
+function getProjectileEvolutionState(player = game.player) {
+  const primary = getSceneSkillGroup(game.scene.id, player.combatClass.id);
+  const derived = getDerivedSkillGroup(game.scene.id, player.combatClass.id);
+  const ids = [...new Set([
+    primary?.core, primary?.link, primary?.aux,
+    derived?.core, derived?.link, derived?.aux,
+  ].filter(Boolean))];
+  const score = ids.reduce((total, id) => total + (player.upgrades[id] || 0), 0);
+  const awakened = Boolean(player.activeSynergy?.synergy);
+  const tier = awakened ? 3 : score >= 3 ? 2 : score >= 1 ? 1 : 0;
+  const pathColor = player.branchFocus === "derived" ? derived?.color : primary?.color;
+  return {
+    tier,
+    score,
+    label: getProjectileEvolutionLabel(tier),
+    color: player.activeSynergy?.color || pathColor || player.combatClass.color || game.scene.colors.shot,
+    awakened,
+  };
+}
+
 function captureUpgradeStats(player = game.player) {
   return {
     damage: player.damage,
@@ -1688,11 +1712,13 @@ function captureUpgradeStats(player = game.player) {
     tribulationLevel: player.tribulationLevel,
     lotusLevel: player.lotusLevel,
     talismanLevel: player.talismanLevel,
+    visualTier: getProjectileEvolutionState(player).tier,
   };
 }
 
 function buildUpgradeDeltas(before, after) {
   const deltas = [];
+  if (after.visualTier > before.visualTier) deltas.push({ label: "攻击形态", value: getProjectileEvolutionLabel(after.visualTier) });
   const addPercent = (key, label) => {
     if (after[key] > before[key] + .0001) deltas.push({ label, value: `+${Math.round((after[key] / Math.max(.0001, before[key]) - 1) * 100)}%` });
   };
@@ -1870,6 +1896,9 @@ function makeGame(runType = "main") {
     lastGearPickup: null,
     upgradeFeedback: null,
     lastUpgradeFeedback: null,
+    projectileEvolutionRendered: 0,
+    evolutionImpactRendered: 0,
+    lastEvolutionScarAt: -99,
     combo: 0,
     comboTimer: 0,
     shake: 0,
@@ -2978,6 +3007,7 @@ function shoot() {
   const bladeWave = player.derivedStyle === "bladeWave" && combatClass.id === "melee";
   const assassin = player.derivedStyle === "assassin" && combatClass.id === "ranger";
   const ritualSwarm = player.derivedStyle === "ritualSwarm" && combatClass.id === "mage";
+  const evolution = getProjectileEvolutionState(player);
   const attackId = nextId++;
   const identityPierce = { icicle: 1, laser: 2, rail: 3, flyingSword: 2, spell: 1 }[combatClass.fx] || 0;
   for (let i = 0; i < count; i += 1) {
@@ -3001,6 +3031,10 @@ function shoot() {
       hitRadius: (bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5) + (divineActive ? 4 : 0) + ((player.showcaseProjectileScale || 1) - 1) * 4,
       divineWeapon: divineActive,
       divineClass: divineActive ? combatClass.id : null,
+      evolutionTier: evolution.tier,
+      evolutionLabel: evolution.label,
+      evolutionColor: evolution.color,
+      evolutionPrimary: i === Math.floor(count / 2),
       trail: [],
       age: 0,
       hits: new Set(),
@@ -3978,7 +4012,21 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     critical,
     divineWeapon: Boolean(bullet.divineWeapon),
     divineClass: bullet.divineClass || null,
+    evolutionTier: bullet.evolutionTier || 0,
+    evolutionColor: bullet.evolutionColor || bullet.color,
+    evolutionPrimary: bullet.evolutionPrimary !== false,
   });
+  const evolutionTier = bullet.evolutionTier || 0;
+  if (!lightweight && evolutionTier >= 3 && game.elapsed - game.lastEvolutionScarAt >= (LOW_POWER_DEVICE ? 2.4 : 1.45)) {
+    game.lastEvolutionScarAt = game.elapsed;
+    createTerrainDeformation(x, y, bullet.contactAttack ? 31 : 24, {
+      source: "weapon",
+      intensity: .22,
+      life: LOW_POWER_DEVICE ? 4 : 6.5,
+      color: bullet.evolutionColor || bullet.color,
+      cinematic: false,
+    });
+  }
   if (!lightweight) playCombatImpactSound(getEnemyHitReactionType(bullet), materialProfile.material, critical, enemy?.type === "boss");
   const particleShape = ["snowball", "icicle", "cryo"].includes(bullet.fx) ? "shard"
     : ["powerArc", "flameArc", "flyingSword", "spiritSword", "spiritPet", "rail", "tracer"].includes(bullet.fx) ? "spark"
@@ -7281,6 +7329,7 @@ function drawLunarEnemy(enemy, s, frozen) {
 
 function drawProjectileTrail(bullet) {
   if (!bullet.trail?.length) return;
+  const evolutionTier = bullet.evolutionTier || 0;
   const accent = bullet.accent || bullet.color;
   const tail = bullet.trail[bullet.trail.length - 1];
   const dx = bullet.x - tail.x;
@@ -7288,7 +7337,7 @@ function drawProjectileTrail(bullet) {
   const length = Math.max(1, Math.hypot(dx, dy));
   const nx = -dy / length;
   const ny = dx / length;
-  const width = Math.max(2, bullet.size + (bullet.visual === "starbreaker" ? 5 : 2));
+  const width = Math.max(2, bullet.size + (bullet.visual === "starbreaker" ? 5 : 2) + evolutionTier * 1.35);
   const glow = ctx.createLinearGradient(tail.x, tail.y, bullet.x, bullet.y);
   glow.addColorStop(0, colorAlpha(accent, 0));
   glow.addColorStop(.52, colorAlpha(accent, .28));
@@ -7308,6 +7357,16 @@ function drawProjectileTrail(bullet) {
     ctx.lineWidth = Math.max(.8, width * .22);
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(bullet.x, bullet.y); ctx.stroke();
+  }
+  if (evolutionTier >= 2 && !LOW_POWER_DEVICE) {
+    ctx.strokeStyle = colorAlpha(bullet.evolutionColor || accent, evolutionTier >= 3 ? .7 : .42);
+    ctx.lineWidth = evolutionTier >= 3 ? 1.5 : 1;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(tail.x + nx * side * (width + 3), tail.y + ny * side * (width + 3));
+      ctx.lineTo(bullet.x + nx * side * (width * .64), bullet.y + ny * side * (width * .64));
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -7392,7 +7451,38 @@ function drawBullet(bullet) {
   } else {
     ctx.beginPath(); ctx.arc(0, 0, bullet.explosive ? 5.2 : 3.4, 0, Math.PI * 2); ctx.fill();
   }
+  drawProjectileEvolutionCoating(bullet);
   if (bullet.divineWeapon) drawDivineProjectileCoating(bullet);
+  ctx.restore();
+}
+
+function drawProjectileEvolutionCoating(bullet) {
+  const tier = bullet.evolutionTier || 0;
+  if (tier <= 0) return;
+  game.projectileEvolutionRendered = Math.max(game.projectileEvolutionRendered || 0, tier);
+  if (LOW_POWER_DEVICE && !bullet.evolutionPrimary) return;
+  const color = bullet.evolutionColor || bullet.accent || bullet.color;
+  const pulse = .82 + Math.sin((bullet.age || 0) * 19) * .13;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = colorAlpha(color, tier >= 3 ? .92 : .62);
+  ctx.fillStyle = colorAlpha(color, .82);
+  ctx.lineWidth = tier >= 3 ? 2 : 1.25;
+  const radius = 8 + tier * 3 + Math.min(5, (bullet.size || 3) * .24);
+  ctx.beginPath(); ctx.ellipse(0, 0, radius * 1.28 * pulse, radius * .58, 0, 0, Math.PI * 2); ctx.stroke();
+  if (tier >= 2) {
+    ctx.beginPath(); ctx.moveTo(-radius * 2.2, -radius * .58); ctx.lineTo(radius * .8, 0); ctx.lineTo(-radius * 2.2, radius * .58); ctx.stroke();
+    const nodes = LOW_POWER_DEVICE ? 2 : tier >= 3 ? 4 : 3;
+    for (let index = 0; index < nodes; index += 1) {
+      const angle = (bullet.age || 0) * 7 + index / nodes * Math.PI * 2;
+      ctx.beginPath(); ctx.arc(Math.cos(angle) * radius, Math.sin(angle) * radius * .5, tier >= 3 ? 2 : 1.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  if (tier >= 3 && !LOW_POWER_DEVICE) {
+    ctx.rotate(Math.PI / 4 + (bullet.age || 0) * 2.6);
+    ctx.strokeStyle = colorAlpha("#ffffff", .72);
+    ctx.strokeRect(-radius * .58, -radius * .58, radius * 1.16, radius * 1.16);
+  }
   ctx.restore();
 }
 
@@ -7457,7 +7547,9 @@ function drawImpactMaterial(burst, progress, alpha) {
 function drawImpactBurst(burst) {
   const progress = 1 - burst.life / burst.maxLife;
   const alpha = Math.max(0, 1 - progress);
+  const evolutionTier = burst.evolutionTier || 0;
   ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
+  if (evolutionTier > 0) ctx.scale(1 + evolutionTier * .13, 1 + evolutionTier * .13);
   ctx.globalAlpha = alpha; ctx.lineCap = "round";
   if (game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
   else if (game.showcase) ctx.globalCompositeOperation = "lighter";
@@ -7497,6 +7589,7 @@ function drawImpactBurst(burst) {
     ctx.strokeStyle = "#baf5ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-4, -15); ctx.lineTo(16 + progress * 22, -5); ctx.moveTo(-4, 15); ctx.lineTo(16 + progress * 22, 5); ctx.stroke();
   }
   drawImpactMaterial(burst, progress, alpha);
+  drawEvolutionImpactSignature(burst, progress, alpha);
   if (burst.critical) { ctx.strokeStyle = "#fff36a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 + progress * 28, 0, Math.PI * 2); ctx.stroke(); }
   if (burst.divineWeapon) {
     const definition = divineGearDefinitions[burst.divineClass] || divineGearDefinitions.ranger;
@@ -7512,6 +7605,42 @@ function drawImpactBurst(burst) {
       for (let ray = 0; ray < 6; ray += 1) { ctx.rotate(Math.PI / 3); ctx.fillRect(12, -1.5, 22 + progress * 24, 3); }
     }
     ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawEvolutionImpactSignature(burst, progress, alpha) {
+  const tier = burst.evolutionTier || 0;
+  if (tier <= 0) return;
+  game.evolutionImpactRendered = Math.max(game.evolutionImpactRendered || 0, tier);
+  if (LOW_POWER_DEVICE && !burst.evolutionPrimary) return;
+  const color = burst.evolutionColor || burst.color;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = alpha * (tier >= 3 ? .9 : .68);
+  ctx.strokeStyle = color; ctx.lineWidth = tier >= 3 ? 2.4 : 1.5;
+  const reach = 18 + progress * (25 + tier * 9);
+  const arcs = LOW_POWER_DEVICE ? 1 : tier;
+  for (let index = 0; index < arcs; index += 1) {
+    ctx.save(); ctx.rotate(index / Math.max(1, arcs) * Math.PI * 2 + progress * (tier >= 3 ? 1.8 : .7));
+    ctx.beginPath(); ctx.arc(0, 0, reach + index * 5, -.7, .7); ctx.stroke();
+    ctx.restore();
+  }
+  if (tier >= 2) {
+    ctx.fillStyle = colorAlpha(color, .82);
+    const rays = LOW_POWER_DEVICE ? 3 : 4 + tier * 2;
+    for (let index = 0; index < rays; index += 1) {
+      const angle = index / rays * Math.PI * 2;
+      const inner = 12 + progress * 8;
+      const outer = inner + 13 + tier * 5;
+      ctx.save(); ctx.rotate(angle); ctx.fillRect(inner, -1, outer - inner, 2); ctx.restore();
+    }
+  }
+  if (tier >= 3 && !LOW_POWER_DEVICE) {
+    ctx.rotate(Math.PI / 4 + progress * 2.2);
+    ctx.strokeStyle = colorAlpha("#ffffff", .74);
+    const sigil = 15 + progress * 22;
+    ctx.strokeRect(-sigil, -sigil, sigil * 2, sigil * 2);
   }
   ctx.restore();
 }
@@ -9454,6 +9583,14 @@ if (QA_MODE) {
         invulnerable: Number(game.invulnerable.toFixed(2)),
       },
       combatClass: game.player.combatClass.id,
+      projectileEvolution: {
+        ...getProjectileEvolutionState(game.player),
+        projectileRenderedTier: game.projectileEvolutionRendered || 0,
+        impactRenderedTier: game.evolutionImpactRendered || 0,
+        activeBulletTiers: [...new Set(game.bullets.map((bullet) => bullet.evolutionTier || 0))].sort(),
+        terrainScar: game.bossScars.some((scar) => scar.source === "weapon"),
+        evolutionTerrainScar: game.lastEvolutionScarAt > -90,
+      },
       playerVisual: {
         mode: game.playerVisualMode || "pending",
         renderFailures: renderFailureCount,
