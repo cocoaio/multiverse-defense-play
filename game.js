@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "64";
+const ASSET_REVISION = "65";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -1691,6 +1691,9 @@ function makeGame(runType = "main") {
       supportDroneTimer: .35,
       orbitCoreTimer: 0,
       staggerTimer: 0,
+      damageFlash: 0,
+      damageDirection: 0,
+      lastDamage: 0,
       companionPet: getSelectedPet(),
       companionPetTimer: .45,
       spiritPetLevel: QA_MODE && scene.endless ? 3 : 0,
@@ -2055,6 +2058,7 @@ function update(dt) {
   game.shake = Math.max(0, game.shake - dt * 15);
   game.bossShock = Math.max(0, game.bossShock - dt);
   game.player.staggerTimer = Math.max(0, game.player.staggerTimer - dt);
+  game.player.damageFlash = Math.max(0, game.player.damageFlash - dt * 2.65);
   game.player.muzzle = Math.max(0, game.player.muzzle - dt * 8);
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
   game.player.attackAnim = Math.max(0, game.player.attackAnim - dt * attackPlaybackRate);
@@ -2497,6 +2501,12 @@ function spawnEnemy(type, x, y, forcedAngle) {
     curveSign: Math.random() < .5 ? -1 : 1,
     pursuitPhase: rand(0, Math.PI * 2),
     attackTimer: rand(0.2, 0.8),
+    attackWindup: 0,
+    attackWindupMax: 0,
+    attackRecovery: 0,
+    attackTargetX: game.player.x,
+    attackTargetY: game.player.y,
+    attackAngle: 0,
     skillTimer: rand(2.4, 4.5),
     bossSkillIndex: 0,
     dashTimer: 0,
@@ -2981,24 +2991,56 @@ function createTerrainDeformation(x, y, radius, options = {}) {
   }
 }
 
+function beginEnemyAttack(enemy, duration) {
+  const isRanged = enemy.type === "ranged" || enemy.type === "caster";
+  const leadSeconds = enemy.type === "caster" ? .14 : enemy.type === "ranged" ? .09 : 0;
+  enemy.attackWindup = duration;
+  enemy.attackWindupMax = duration;
+  enemy.attackTargetX = game.player.x + game.move.x * game.player.moveSpeed * leadSeconds;
+  enemy.attackTargetY = game.player.y + game.move.y * game.player.moveSpeed * leadSeconds;
+  enemy.attackAngle = Math.atan2(enemy.attackTargetY - enemy.y, enemy.attackTargetX - enemy.x);
+  if (isRanged) enemy.rangedFlash = Math.max(enemy.rangedFlash || 0, duration);
+}
+
+function resolveEnemyAttack(enemy) {
+  const isRanged = enemy.type === "ranged" || enemy.type === "caster";
+  if (isRanged) {
+    fireEnemyProjectile(enemy, enemy.attackTargetX, enemy.attackTargetY);
+    enemy.attackTimer = enemy.type === "caster" ? rand(3.1, 4.0) : rand(2.45, 3.25);
+    enemy.attackRecovery = .2;
+    return;
+  }
+  const angle = enemy.attackAngle;
+  const reach = enemy.size + (enemy.type === "boss" ? 38 : enemy.type === "tank" ? 29 : 24);
+  const strikeX = enemy.x + Math.cos(angle) * reach * .72;
+  const strikeY = enemy.y + Math.sin(angle) * reach * .72;
+  const hit = Math.hypot(game.player.x - enemy.x, game.player.y - enemy.y) <= reach;
+  game.shockwaves.push({ x: strikeX, y: strikeY, radius: 2, maxRadius: enemy.type === "boss" ? 31 : 18, life: .24, color: hit ? "#ff7169" : enemy.color });
+  makeDirectionalParticles(strikeX, strikeY, hit ? "#ff806f" : enemy.color, enemy.type === "boss" ? 10 : 5, enemy.type === "boss" ? 125 : 78, angle, .55, "spark");
+  if (hit) damagePlayer(enemy.damage, enemy.x, enemy.y, enemy.type === "boss");
+  enemy.attackTimer = enemy.type === "boss" ? .82 : enemy.type === "runner" ? .92 : 1.08;
+  enemy.attackRecovery = enemy.type === "boss" ? .28 : .18;
+}
+
 function updateEnemies(dt) {
   for (const enemy of game.enemies) {
     if (enemy.dead) continue;
     enemy.flash = Math.max(0, enemy.flash - dt);
     enemy.hitKick = Math.max(0, (enemy.hitKick || 0) - dt * 62);
     enemy.rangedFlash = Math.max(0, (enemy.rangedFlash || 0) - dt);
+    enemy.attackRecovery = Math.max(0, (enemy.attackRecovery || 0) - dt);
     enemy.slowTimer = Math.max(0, enemy.slowTimer - dt);
     enemy.skillTimer -= dt;
     enemy.dashTimer = Math.max(0, enemy.dashTimer - dt);
     const playerDx = game.player.x - enemy.x;
     const playerDy = game.player.y - enemy.y;
     const playerDistance = Math.max(1, Math.hypot(playerDx, playerDy));
-    if (enemy.type === "runner" && enemy.skillTimer <= 0 && playerDistance < 300) {
+    if (enemy.type === "runner" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 300) {
       enemy.dashTimer = .48;
       enemy.skillTimer = rand(2.8, 4.2);
       game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 2, maxRadius: 22, life: .25, color: enemy.color });
     }
-    if (enemy.type === "boss" && enemy.skillTimer <= 0 && playerDistance < 430) {
+    if (enemy.type === "boss" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 430) {
       enemy.skillTimer = rand(4.8, 6.4);
       enemy.bossSkillIndex = (enemy.bossSkillIndex || 0) + 1;
       const radius = game.scene.endless ? 118 : game.scene.id === "hospital" ? 104 : 112;
@@ -3024,6 +3066,11 @@ function updateEnemies(dt) {
       const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
       game.banner = { text: `${bossName} · ${impact.name}`, sub: `命中损失 ${Math.max(50, Math.round(enemy.damage * 1.65))} 生命并陷入重创`, time: 1.45 };
     }
+    if (enemy.attackWindup > 0) {
+      enemy.attackWindup = Math.max(0, enemy.attackWindup - dt);
+      if (enemy.attackWindup <= 0) resolveEnemyAttack(enemy);
+      continue;
+    }
     const slow = enemy.slowTimer > 0 ? 0.5 : 1;
     const dash = enemy.dashTimer > 0 ? 2.7 : 1;
     const rage = enemy.type === "boss" && enemy.hp < enemy.maxHp * .42 ? 1.38 : 1;
@@ -3047,8 +3094,7 @@ function updateEnemies(dt) {
       }
       enemy.attackTimer -= dt;
       if (enemy.attackTimer <= 0 && playerDistance < preferredRange + 90) {
-        fireEnemyProjectile(enemy);
-        enemy.attackTimer = enemy.type === "caster" ? rand(3.1, 4.0) : rand(2.45, 3.25);
+        beginEnemyAttack(enemy, enemy.type === "caster" ? .72 : .48);
       }
     } else if (playerDistance > attackDistance) {
       const pressureRelief = game.health / game.maxHealth < .28 ? .78 : 1;
@@ -3062,16 +3108,16 @@ function updateEnemies(dt) {
     } else {
       enemy.attackTimer -= dt;
       if (enemy.attackTimer <= 0) {
-        enemy.attackTimer = enemy.type === "boss" ? 0.72 : 1.05;
-        damagePlayer(enemy.damage, enemy.x, enemy.y, enemy.type === "boss");
+        const windup = enemy.type === "boss" ? .52 : enemy.type === "tank" ? .44 : enemy.type === "runner" ? .2 : .3;
+        beginEnemyAttack(enemy, windup);
       }
     }
   }
   game.enemies = game.enemies.filter((enemy) => !enemy.dead);
 }
 
-function fireEnemyProjectile(enemy) {
-  const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
+function fireEnemyProjectile(enemy, targetX = game.player.x, targetY = game.player.y) {
+  const angle = Math.atan2(targetY - enemy.y, targetX - enemy.x);
   const caster = enemy.type === "caster";
   const speed = caster ? 132 : 172;
   const damage = Math.round((caster ? 64 : 55) * (0.9 + game.difficulty * .1) * (.92 + game.director * .08));
@@ -3142,8 +3188,12 @@ function damagePlayer(rawDamage, sourceX, sourceY, heavy = false) {
   const healthFloor = game.showcase ? Math.round(game.maxHealth * .12) : 0;
   game.health = Math.max(healthFloor, game.health - damage);
   if (heavy) game.player.staggerTimer = Math.max(game.player.staggerTimer || 0, .62);
+  game.player.damageFlash = Math.max(game.player.damageFlash || 0, heavy ? .92 : .64);
+  game.player.damageDirection = Math.atan2(sourceY - game.player.y, sourceX - game.player.x);
+  game.player.lastDamage = damage;
+  game.invulnerable = Math.max(game.invulnerable, heavy ? .36 : .2);
   game.shake = Math.max(game.shake, heavy ? 11 : 4);
-  game.flash = heavy ? .23 : .15;
+  game.flash = Math.max(game.flash, heavy ? .16 : .08);
   if (preferences.damageNumbers) addFloater(game.player.x, game.player.y - 34, `-${damage}`, "#ff7169", heavy ? 17 : 14);
   const angle = Math.atan2(game.player.y - sourceY, game.player.x - sourceX);
   makeDirectionalParticles(game.player.x, game.player.y, "#ff7a68", heavy ? 11 : 5, heavy ? 130 : 75, angle, .85, "spark");
@@ -4534,12 +4584,36 @@ function render() {
     drawDivineAwakeningOverlay();
     if (game.flash > 0) {
       const flashAlpha = game.flash * (preferences.reduceMotion ? .065 : .25);
-      ctx.fillStyle = `rgba(${game.health <= 0 ? "255,55,45" : "138,255,211"},${flashAlpha})`;
+      const flashTone = game.health <= 0 || game.player.damageFlash > 0 ? "255,72,58" : "138,255,211";
+      ctx.fillStyle = `rgba(${flashTone},${flashAlpha})`;
       ctx.fillRect(0, 0, W, H);
     }
+    drawPlayerDamageOverlay();
   } else {
     drawHomeSilhouettes();
   }
+}
+
+function drawPlayerDamageOverlay() {
+  const intensity = Math.min(1, game.player.damageFlash || 0);
+  if (intensity <= 0) return;
+  ctx.save();
+  const edgeAlpha = intensity * (preferences.reduceMotion ? .16 : .3);
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, H * .16, W / 2, H / 2, H * .58);
+  vignette.addColorStop(.46, "rgba(255,45,35,0)");
+  vignette.addColorStop(1, `rgba(126,5,5,${edgeAlpha})`);
+  ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(game.player.damageDirection || 0);
+  ctx.strokeStyle = `rgba(255,224,208,${.38 + intensity * .58})`;
+  ctx.lineWidth = 2 + intensity * 3;
+  ctx.beginPath(); ctx.arc(0, 0, 46 + intensity * 10, -.48, .48); ctx.stroke();
+  ctx.strokeStyle = `rgba(255,74,58,${.48 + intensity * .48})`;
+  ctx.lineWidth = 4 + intensity * 4;
+  ctx.beginPath(); ctx.arc(0, 0, 54 + intensity * 13, -.38, .38); ctx.stroke();
+  ctx.fillStyle = `rgba(255,238,225,${.62 + intensity * .34})`;
+  ctx.beginPath(); ctx.moveTo(72 + intensity * 8, 0); ctx.lineTo(58, -8); ctx.lineTo(58, 8); ctx.closePath(); ctx.fill();
+  ctx.restore();
 }
 
 function drawBossScreenShock() {
@@ -5621,14 +5695,61 @@ function drawCorpse(corpse) {
   ctx.restore();
 }
 
+function drawEnemyAttackCue(enemy, s) {
+  if (!(enemy.attackWindup > 0) || !(enemy.attackWindupMax > 0)) return;
+  const progress = Math.min(1, Math.max(0, 1 - enemy.attackWindup / enemy.attackWindupMax));
+  const pulse = .7 + Math.sin(ambienceTime * 28) * .22;
+  const isRanged = enemy.type === "ranged" || enemy.type === "caster";
+  const cueColor = enemy.type === "caster" ? game.scene.colors.hit : enemy.type === "ranged" ? game.scene.colors.shot : "#ff8a70";
+  ctx.save();
+  ctx.translate(enemy.x, enemy.y);
+  ctx.rotate(enemy.attackAngle || 0);
+  ctx.globalCompositeOperation = "source-over";
+  if (isRanged) {
+    const targetDistance = Math.hypot(enemy.attackTargetX - enemy.x, enemy.attackTargetY - enemy.y);
+    const cueLength = Math.min(targetDistance, s * (enemy.type === "caster" ? 4.1 : 3.5));
+    ctx.strokeStyle = "rgba(5,7,9,.82)"; ctx.lineWidth = enemy.type === "caster" ? 7 : 5;
+    ctx.beginPath(); ctx.moveTo(s * .72, 0); ctx.lineTo(cueLength, 0); ctx.stroke();
+    ctx.strokeStyle = colorAlpha(cueColor, .55 + progress * .4); ctx.lineWidth = enemy.type === "caster" ? 3.5 : 2;
+    ctx.setLineDash(enemy.type === "caster" ? [7, 5] : [12, 7]); ctx.lineDashOffset = -ambienceTime * 36;
+    ctx.beginPath(); ctx.moveTo(s * .72, 0); ctx.lineTo(cueLength, 0); ctx.stroke(); ctx.setLineDash([]);
+    ctx.translate(cueLength, 0);
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, 5 + progress * 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = colorAlpha(cueColor, .38 + progress * .42);
+    ctx.beginPath(); ctx.arc(0, 0, 3 + progress * 4, 0, Math.PI * 2); ctx.fill();
+  } else {
+    const radius = s * (1.42 + progress * .35);
+    ctx.strokeStyle = "rgba(8,5,6,.82)"; ctx.lineWidth = enemy.type === "boss" ? 9 : 6;
+    ctx.beginPath(); ctx.arc(0, 0, radius, -.78, .78); ctx.stroke();
+    ctx.strokeStyle = colorAlpha(cueColor, pulse + progress * .18); ctx.lineWidth = enemy.type === "boss" ? 5 : 3;
+    ctx.beginPath(); ctx.arc(0, 0, radius, -.78, -.78 + 1.56 * progress); ctx.stroke();
+    ctx.fillStyle = colorAlpha(cueColor, .62 + progress * .32);
+    ctx.beginPath(); ctx.moveTo(radius + 7, 0); ctx.lineTo(radius - 5, -6); ctx.lineTo(radius - 5, 6); ctx.closePath(); ctx.fill();
+    ctx.save();
+    ctx.rotate(-(enemy.attackAngle || 0));
+    ctx.translate(0, -s * (enemy.type === "boss" ? 2.4 : 2.05));
+    ctx.fillStyle = "rgba(12,6,7,.88)"; ctx.strokeStyle = cueColor; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, enemy.type === "boss" ? 14 : 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.font = `950 ${enemy.type === "boss" ? 16 : 12}px system-ui`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("!", 0, 1);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
   ctx.save();
   const kick = enemy.hitKick || 0;
   const kickAngle = enemy.hitAngle || 0;
+  const windupProgress = enemy.attackWindupMax > 0 && enemy.attackWindup > 0 ? 1 - enemy.attackWindup / enemy.attackWindupMax : 0;
+  const attackLean = enemy.attackWindup > 0
+    ? (enemy.type === "ranged" || enemy.type === "caster" ? -.055 : -.12 + windupProgress * .15)
+    : enemy.attackRecovery > 0 ? .07 * Math.min(1, enemy.attackRecovery / .18) : 0;
   ctx.translate(enemy.x + Math.cos(kickAngle) * kick, enemy.y + Math.sin(kickAngle) * kick);
-  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06));
+  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
   else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, frozen);
@@ -5653,6 +5774,7 @@ function drawEnemy(enemy) {
     ctx.beginPath(); ctx.arc(0, 0, s * 1.16, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
+  drawEnemyAttackCue(enemy, s);
 
   if ((enemy.type === "tank" || enemy.type === "boss") && enemy.hp < enemy.maxHp) {
     const width = s * 1.65;
@@ -5776,8 +5898,12 @@ function drawCultivationEnemy(enemy, s, frozen) {
 }
 
 function drawEnemyWeaponRole(enemy, s) {
-  const charging = Math.min(1, (enemy.rangedFlash || 0) / .24);
-  ctx.save(); ctx.rotate(Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x));
+  const winding = enemy.attackWindup > 0 && enemy.attackWindupMax > 0
+    ? 1 - enemy.attackWindup / enemy.attackWindupMax
+    : 0;
+  const charging = Math.max(winding, Math.min(1, (enemy.rangedFlash || 0) / .24));
+  const aimAngle = enemy.attackWindup > 0 ? enemy.attackAngle : Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
+  ctx.save(); ctx.rotate(aimAngle);
   ctx.shadowColor = game.scene.colors.hit; ctx.shadowBlur = 6 + charging * 12;
   if (enemy.type === "ranged") {
     const weaponColor = game.scene.endless ? "#d8b778" : game.scene.id === "snow" ? "#d9f7ff" : "#d3dfdf";
@@ -7962,6 +8088,18 @@ if (QA_MODE) {
         active: game.bossWarnings.length,
         overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
+      },
+      enemyTelegraphs: {
+        active: game.enemies.filter((enemy) => enemy.attackWindup > 0).length,
+        ranged: game.enemies.filter((enemy) => enemy.attackWindup > 0 && ["ranged", "caster"].includes(enemy.type)).length,
+        melee: game.enemies.filter((enemy) => enemy.attackWindup > 0 && !["ranged", "caster"].includes(enemy.type)).length,
+        maxProgress: Number(game.enemies.reduce((maximum, enemy) => Math.max(maximum, enemy.attackWindupMax > 0 && enemy.attackWindup > 0 ? 1 - enemy.attackWindup / enemy.attackWindupMax : 0), 0).toFixed(2)),
+      },
+      playerDamage: {
+        flash: Number((game.player.damageFlash || 0).toFixed(2)),
+        direction: Number((game.player.damageDirection || 0).toFixed(2)),
+        lastDamage: game.player.lastDamage || 0,
+        invulnerable: Number(game.invulnerable.toFixed(2)),
       },
       combatClass: game.player.combatClass.id,
       playerVisual: {
