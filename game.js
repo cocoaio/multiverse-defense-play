@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "63";
+const ASSET_REVISION = "64";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -853,7 +853,16 @@ let assetLaunchPending = false;
 let lastRunType = "main";
 let tutorialFlow = { homeStep: 0, battlePending: false, featurePaused: false };
 const movementKeys = new Set();
-const pointerMove = { x: W / 2, y: H / 2, originX: W / 2, originY: H / 2, active: false, touchId: null, touchMode: false };
+const pointerMove = {
+  x: W / 2,
+  y: H / 2,
+  originX: W / 2,
+  originY: H / 2,
+  active: false,
+  touchId: null,
+  touchMode: false,
+  lastInputAt: 0,
+};
 let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
 let selectedLevel = Math.max(1, Math.min(LEVELS_PER_SCENE, meta.currentLevel || 1));
 
@@ -4906,6 +4915,12 @@ function drawBattlefield() {
     const particle = game.particles[index];
     if (isWorldPointVisible(particle.x, particle.y, 28)) drawCombatParticle(particle);
   }
+  // Boss danger information is deliberately rendered after combat VFX. The
+  // ground wash still sits below actors, while this final outline cannot be
+  // buried by ultimate particles, projectiles or impact flashes.
+  for (const warning of game.bossWarnings) {
+    if (isWorldPointVisible(warning.x, warning.y, warning.radius + 38)) drawBossWarningOverlay(warning);
+  }
   ctx.globalAlpha = 1;
   for (const floater of game.floaters) if (isWorldPointVisible(floater.x, floater.y, 40)) drawFloater(floater);
   ctx.restore();
@@ -5136,6 +5151,59 @@ function drawBossWarning(warning) {
     ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.font = "800 10px system-ui";
     ctx.fillText(`命中 -${warning.damage} · 重创减速`, 0, warning.radius * .58);
   }
+  ctx.restore();
+}
+
+function drawBossWarningOverlay(warning) {
+  const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
+  const dangerAlpha = warning.detonated ? Math.min(1, warning.life * 2.1) : .72 + charge * .28;
+  const countdownRadius = warning.radius * Math.max(.18, 1 - charge * .78);
+  ctx.save();
+  ctx.translate(warning.x, warning.y);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = dangerAlpha;
+  if (game.performance.quality >= .62 && allowExpensiveGlow()) {
+    ctx.shadowColor = warning.color;
+    ctx.shadowBlur = 12 + charge * 10;
+  }
+
+  // A dark keyline keeps the danger edge readable on snow, hospital floors,
+  // bright ultimates and the max-power tutorial alike.
+  ctx.strokeStyle = "rgba(8,5,9,.86)";
+  ctx.lineWidth = warning.detonated ? 12 : 9;
+  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = warning.detonated ? "#ffffff" : warning.color;
+  ctx.lineWidth = warning.detonated ? 6 : 4;
+  ctx.setLineDash(warning.detonated ? [] : [18, 8]);
+  ctx.lineDashOffset = -ambienceTime * (18 + charge * 42);
+  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (!warning.detonated) {
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,.92)";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 0, countdownRadius, 0, Math.PI * 2); ctx.stroke();
+    for (let index = 0; index < 8; index += 1) {
+      const angle = index / 8 * Math.PI * 2 + ambienceTime * .55;
+      ctx.save();
+      ctx.rotate(angle);
+      ctx.translate(warning.radius + 9, 0);
+      ctx.fillStyle = index % 2 ? "#ffffff" : warning.color;
+      ctx.beginPath(); ctx.moveTo(-10, -5); ctx.lineTo(2, 0); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    const label = `危险  ${Math.max(0, warning.delay).toFixed(1)}s`;
+    ctx.font = "950 12px system-ui";
+    const labelWidth = Math.max(86, ctx.measureText(label).width + 22);
+    ctx.fillStyle = "rgba(8,5,9,.9)";
+    ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.fill();
+    ctx.strokeStyle = warning.color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, 0, -warning.radius - 22.5);
+  }
+  warning.overlayRendered = true;
   ctx.restore();
 }
 
@@ -7779,22 +7847,34 @@ ui.confirmReset.addEventListener("click", clearLocalData);
 function updatePointerMovement(event) {
   if (!game || mode !== "playing" || paused) return;
   if (event.pointerType !== "mouse" && pointerMove.touchId !== event.pointerId) return;
+  const coalesced = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : null;
+  const sample = coalesced?.length ? coalesced[coalesced.length - 1] : event;
   const rect = canvas.getBoundingClientRect();
-  const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+  const inside = sample.clientX >= rect.left && sample.clientX <= rect.right && sample.clientY >= rect.top && sample.clientY <= rect.bottom;
   if (!inside) {
     if (event.pointerType === "mouse") { pointerMove.active = false; game.move = { x: 0, y: 0 }; }
     return;
   }
-  pointerMove.x = (event.clientX - rect.left) / rect.width * W;
-  pointerMove.y = (event.clientY - rect.top) / rect.height * H;
+  if (event.cancelable) event.preventDefault();
+  pointerMove.x = (sample.clientX - rect.left) / rect.width * W;
+  pointerMove.y = (sample.clientY - rect.top) / rect.height * H;
   pointerMove.active = true;
+  pointerMove.lastInputAt = performance.now();
   const touch = event.pointerType !== "mouse";
   pointerMove.touchMode = touch;
-  const dx = pointerMove.x - (touch ? pointerMove.originX : W / 2);
-  const dy = pointerMove.y - (touch ? pointerMove.originY : H / 2);
-  const distance = Math.hypot(dx, dy);
-  const deadZone = touch ? 7 : 34;
-  const strength = Math.min(1, Math.max(0, (distance - deadZone) / (touch ? 52 : 125)));
+  let dx = pointerMove.x - (touch ? pointerMove.originX : W / 2);
+  let dy = pointerMove.y - (touch ? pointerMove.originY : H / 2);
+  let distance = Math.hypot(dx, dy);
+  if (touch && distance > 68) {
+    const overflow = distance - 68;
+    pointerMove.originX += dx / distance * overflow;
+    pointerMove.originY += dy / distance * overflow;
+    dx = pointerMove.x - pointerMove.originX;
+    dy = pointerMove.y - pointerMove.originY;
+    distance = Math.hypot(dx, dy);
+  }
+  const deadZone = touch ? 4 : 34;
+  const strength = Math.min(1, Math.max(0, (distance - deadZone) / (touch ? 34 : 125)));
   game.move.x = distance > deadZone ? dx / distance * strength : 0;
   game.move.y = distance > deadZone ? dy / distance * strength : 0;
 }
@@ -7807,7 +7887,7 @@ window.addEventListener("pointerdown", (event) => {
   pointerMove.originY = (event.clientY - rect.top) / rect.height * H;
   pointerMove.x = pointerMove.originX;
   pointerMove.y = pointerMove.originY;
-  canvas.setPointerCapture?.(event.pointerId);
+  try { canvas.setPointerCapture?.(event.pointerId); } catch (error) { /* Synthetic and embedded browsers may reject capture; window listeners remain active. */ }
   updatePointerMovement(event);
 });
 window.addEventListener("pointermove", updatePointerMovement);
@@ -7870,6 +7950,18 @@ if (QA_MODE) {
         frameMs: Number(game.performance.frameMs.toFixed(1)),
         targetFps: game.performance.targetFps,
         limits: { ...EFFECT_LIMITS },
+      },
+      controls: {
+        active: pointerMove.active,
+        touchMode: pointerMove.touchMode,
+        touchId: pointerMove.touchId,
+        move: { x: Number(game.move.x.toFixed(2)), y: Number(game.move.y.toFixed(2)) },
+        ultimateActive: Boolean(game.ultimate),
+      },
+      bossDanger: {
+        active: game.bossWarnings.length,
+        overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
+        timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
       },
       combatClass: game.player.combatClass.id,
       playerVisual: {
