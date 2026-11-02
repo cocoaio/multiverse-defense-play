@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "61";
+const ASSET_REVISION = "62";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -772,7 +772,7 @@ const defaultMeta = {
   pet: { version: 2, unlocked: false, owned: [], selected: null, giftClaimed: false },
   petDungeon: { date: "", freeEntries: 1, adEntries: 1, clears: 0 },
   energy: { date: "", current: 8, max: 8, adRestores: 0 },
-  tutorial: { version: 1, completed: false },
+  tutorial: { version: 2, completed: false },
 };
 
 function loadMeta() {
@@ -807,6 +807,7 @@ function loadMeta() {
 
 let meta = loadMeta();
 if (meta.pet.version !== 2) meta.pet = structuredClone(defaultMeta.pet);
+if (meta.tutorial.version !== 2) meta.tutorial = structuredClone(defaultMeta.tutorial);
 if (ADMIN_MODE) {
   meta.coins = 999999;
   meta.energy = { date: todayKey(), current: 99, max: 99, adRestores: 0 };
@@ -860,7 +861,7 @@ function setTutorialProgress(step, total = 4) {
   ui.tutorialProgress.innerHTML = Array.from({ length: total }, (_, index) => `<i class="${index <= step ? "active" : ""}"></i>`).join("");
 }
 
-function showTutorialCard({ step, total = 4, section = "新兵训练", icon, title, description, action, waiting = false, combat = false, target = null, onAction = null }) {
+function showTutorialCard({ step, total = 4, section = "新兵训练", icon, title, description, action, waiting = false, combat = false, locked = false, target = null, onAction = null }) {
   clearTutorialFocus();
   ui.tutorial.classList.remove("hidden", "home-step", "combat-step");
   ui.tutorial.classList.add(combat ? "combat-step" : "home-step");
@@ -872,6 +873,7 @@ function showTutorialCard({ step, total = 4, section = "新兵训练", icon, tit
   ui.tutorialAction.classList.toggle("waiting", waiting);
   ui.tutorialAction.onclick = onAction;
   ui.tutorialAction.disabled = waiting && !onAction;
+  ui.tutorialSkip.classList.toggle("hidden", locked);
   setTutorialProgress(step, total);
   target?.classList.add("tutorial-focus");
 }
@@ -880,6 +882,7 @@ function hideTutorialCard() {
   clearTutorialFocus();
   ui.tutorial.classList.add("hidden");
   ui.tutorial.classList.remove("home-step", "combat-step", "tutorial-suspended");
+  ui.tutorialSkip.classList.remove("hidden");
 }
 
 function finishTutorial(showCompletion = true) {
@@ -933,36 +936,25 @@ function completeTutorial(showCompletion = true) {
 }
 
 function showHomeTutorial(step = 0) {
-  tutorialFlow.homeStep = step;
-  tutorialFlow.battlePending = false;
-  if (step === 0) {
-    showTutorialCard({
-      step: 0, icon: "界", title: "第一次出击",
-      description: "角色会自动攻击。你只需要控制走位、主动拾取经验，并在关键时刻释放大招。我们用第一关快速练一遍。",
-      action: "带我去第一关", target: ui.openMap,
-      onAction: () => {
-        selectedSceneIndex = 0; selectedLevel = 1; meta.currentScene = 0; meta.currentLevel = 1;
-        renderHome(); switchHomePanel("world"); showHomeTutorial(1);
-      },
-    });
-    return;
-  }
-  if (step === 1) {
-    showTutorialCard({
-      step: 1, icon: "01", title: "锁定第一战区",
-      description: "每关都有明确击杀任务。先从沦陷都市 01 开始，通关会逐步开放本章后续区域。",
-      action: "选择本局职业", target: ui.start,
-      onAction: () => { openLoadout("main"); requestAnimationFrame(() => showHomeTutorial(2)); },
-    });
-    return;
-  }
+  tutorialFlow.homeStep = 0;
   tutorialFlow.battlePending = true;
   showTutorialCard({
-    step: 2, icon: "武", title: "模型决定攻击方式",
-    description: "看清卡片上的武器：拿动力刃就挥斩，拿磁轨枪就射击，电弧核心才会放电。任选一名角色进入实战。",
-    action: "我自己选职业", target: ui.classChoices.querySelector(".class-card"),
-    onAction: hideTutorialCard,
+    step: 0, total: 1, section: "极限战力演练", icon: "MAX", title: "先体验巅峰战力",
+    description: "本局临时开放 LV.MAX、满级神装、顶级技能联动、灵宠与最高视觉精度，并投放超高血量首领。训练数据不会写入正式存档，结束后角色会回到初始状态。",
+    action: "开启满配爽局", locked: true,
+    onAction: startShowcaseTutorial,
   });
+}
+
+function startShowcaseTutorial() {
+  selectedSceneIndex = 0;
+  selectedLevel = 1;
+  hideTutorialCard();
+  document.querySelector("#loadoutTitle").textContent = "正在装载巅峰战力演练";
+  document.querySelector(".loadout-hint").textContent = "临时接入满级神装、终极技能链与最高精度战场；正式存档不会发生变化。";
+  ui.classChoices.innerHTML = `<div class="showcase-loadout"><i>MAX</i><b>街区神射手 · 超限形态</b><small>神装磁轨 · 穿城弹链 · 无人机群 · 玄甲战獒</small></div>`;
+  ui.loadoutModal.classList.remove("hidden");
+  startGame("ranger", "tutorialShowcase");
 }
 
 function beginCombatTutorial() {
@@ -977,9 +969,9 @@ function beginCombatTutorial() {
     xpAtStart: game.pickedXp,
   };
   showTutorialCard({
-    step: 0, icon: "⌖", title: "先移动起来",
-    description: "手机按住战场并拖向目标方向；电脑让鼠标指向移动方向，也可使用 WASD。移动约两步即可。",
-    action: "等待移动…", waiting: true, combat: true,
+    step: 0, total: game.showcase ? 5 : 4, section: game.showcase ? "巅峰战力演练" : "新兵训练", icon: "⌖", title: "先移动起来",
+    description: game.showcase ? "你现在拥有本作已知最高战力。手机按住战场拖动，电脑让鼠标指向移动方向；先移动两步，满级神装会自动清场。" : "手机按住战场并拖向目标方向；电脑让鼠标指向移动方向，也可使用 WASD。移动约两步即可。",
+    action: "等待移动…", waiting: true, combat: true, locked: Boolean(game.showcase),
   });
 }
 
@@ -988,14 +980,14 @@ function advanceCombatTutorial(nextStep) {
   game.tutorial.step = nextStep;
   if (nextStep === "attack") {
     game.tutorial.killsAtStart = game.kills;
-    showTutorialCard({ step: 1, icon: "✦", title: "攻击是自动的", description: "保持走位，不必连续点屏幕。角色会用当前模型手中的武器攻击最近目标。", action: "等待首次击破…", waiting: true, combat: true });
+    showTutorialCard({ step: 1, total: game.showcase ? 5 : 4, section: game.showcase ? "巅峰战力演练" : "新兵训练", icon: "✦", title: game.showcase ? "满级火力自动接敌" : "攻击是自动的", description: game.showcase ? "神装磁轨、穿城弹链、无人机群和灵宠正在同时攻击。保持走位，观察贯穿、爆破与技能联动。" : "保持走位，不必连续点屏幕。角色会用当前模型手中的武器攻击最近目标。", action: "等待首次击破…", waiting: true, combat: true, locked: Boolean(game.showcase) });
   } else if (nextStep === "xp") {
     game.tutorial.xpAtStart = game.pickedXp;
-    showTutorialCard({ step: 2, icon: "◆", title: "经验必须亲自拾取", description: "怪物倒下后经验留在原地。主动靠近光点，经验才会被吸收并触发升级选择。", action: "靠近经验光点…", waiting: true, combat: true });
+    showTutorialCard({ step: 2, total: game.showcase ? 5 : 4, section: game.showcase ? "巅峰战力演练" : "新兵训练", icon: "◆", title: "经验必须亲自拾取", description: game.showcase ? "满级演练不会继续升级，但经验仍掉落在原地。靠近晶体完成拾取，正式战斗里它会决定你的技能成长。" : "怪物倒下后经验留在原地。主动靠近光点，经验才会被吸收并触发升级选择。", action: "靠近经验光点…", waiting: true, combat: true, locked: Boolean(game.showcase) });
   } else if (nextStep === "ultimate") {
     game.pulseTimer = 0;
     const model = getSceneCombatModel(game.scene.id, game.player.combatClass.id);
-    showTutorialCard({ step: 3, icon: model.icon, title: `释放${model.ultimate}`, description: `大招已为教学立即充能。点击右下角大招，或在电脑按空格；它会使用与${model.weapon}一致的主题表现。`, action: "立即释放大招", combat: true, target: ui.pulse, onAction: activatePulse });
+    showTutorialCard({ step: 3, total: game.showcase ? 5 : 4, section: game.showcase ? "巅峰战力演练" : "新兵训练", icon: model.icon, title: `释放${model.ultimate}`, description: game.showcase ? `终极系统已满载。点击右下角或按空格，释放最高规格的${model.ultimate}；随后超高血量首领将进入战场。` : `大招已为教学立即充能。点击右下角大招，或在电脑按空格；它会使用与${model.weapon}一致的主题表现。`, action: "立即释放大招", combat: true, locked: Boolean(game.showcase), target: ui.pulse, onAction: activatePulse });
   }
 }
 
@@ -1066,6 +1058,7 @@ function refreshPetProgression() {
 }
 
 function getEquippedSkin() {
+  if (game?.showcase) return skinDefinitions.find((skin) => skin.id === "immortal") || skinDefinitions[0];
   return skinDefinitions.find((skin) => skin.id === meta.skins.equipped) || skinDefinitions[0];
 }
 
@@ -1187,7 +1180,7 @@ function getSceneRequirement(index) {
 }
 
 function getRunEnergyCost(runType = "main") {
-  if (runType === "petDungeon") return 0;
+  if (runType === "petDungeon" || runType === "tutorialShowcase") return 0;
   return scenes[selectedSceneIndex].endless && runType !== "resource" ? 2 : 1;
 }
 
@@ -1551,6 +1544,7 @@ function isLevelUnlocked(sceneIndex, level) {
 }
 
 function makeGame(runType = "main") {
+  const showcase = runType === "tutorialShowcase";
   const baseScene = scenes[selectedSceneIndex];
   const scene = (runType === "resource" || runType === "petDungeon") && baseScene.endless ? { ...baseScene, endless: false } : baseScene;
   const missionLevel = selectedLevel;
@@ -1564,19 +1558,20 @@ function makeGame(runType = "main") {
   const divine = divineState.unlocked ? getDivineGearCombatStats(divineState.level, selectedSceneIndex) : { damage: 0, health: 0, crit: 0, pulse: 0 };
   const endlessNoviceGrace = scene.endless ? Math.max(0, Math.min(1, (360 - getCombatPower(combatClass.id)) / 260)) : 0;
   const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health) * (1 + endlessNoviceGrace * .45));
-  const newPlayerRamp = runType === "main" && selectedSceneIndex === 0 && missionLevel <= 2 && meta.wins < 2;
-  const missionTarget = runType === "petDungeon" ? 62 : runType === "resource" ? 45 : scene.endless ? Infinity : newPlayerRamp ? 22 + missionLevel * 3 : 26 + selectedSceneIndex * 6 + missionLevel * 3;
+  const newPlayerRamp = !showcase && runType === "main" && selectedSceneIndex === 0 && missionLevel <= 2 && meta.wins < 2;
+  const missionTarget = showcase ? 1 : runType === "petDungeon" ? 62 : runType === "resource" ? 45 : scene.endless ? Infinity : newPlayerRamp ? 22 + missionLevel * 3 : 26 + selectedSceneIndex * 6 + missionLevel * 3;
   const isDivineTutorialStage = selectedSceneIndex === 0 && missionLevel <= 2;
-  const shouldDeliverDivineGear = runType === "main" && isDivineTutorialStage && !divineState.unlocked;
+  const shouldDeliverDivineGear = !showcase && runType === "main" && isDivineTutorialStage && !divineState.unlocked;
   return {
+    showcase,
     scene,
     sceneIndex: selectedSceneIndex,
     missionLevel,
     levelModifier,
     runType,
-    difficulty: runType === "petDungeon" ? 1.48 + meta.petDungeon.clears * .07 : runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
+    difficulty: showcase ? 2.2 : runType === "petDungeon" ? 1.48 + meta.petDungeon.clears * .07 : runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
     endlessNoviceGrace,
-    waveSeconds: QA_MODE ? 2 : runType === "petDungeon" ? 9.5 : runType === "resource" ? 8.5 : newPlayerRamp ? 9.6 + missionLevel * .4 : 11.5 + Math.min(2.5, missionLevel * 0.22),
+    waveSeconds: showcase ? 999 : QA_MODE ? 2 : runType === "petDungeon" ? 9.5 : runType === "resource" ? 8.5 : newPlayerRamp ? 9.6 + missionLevel * .4 : 11.5 + Math.min(2.5, missionLevel * 0.22),
     elapsed: 0,
     wave: 1,
     maxHealth,
@@ -1615,19 +1610,19 @@ function makeGame(runType = "main") {
     newPlayerRamp,
     openingGrace: newPlayerRamp ? 8 : 0,
     pacingCueShown: false,
-    initialEnemyCount: newPlayerRamp ? 3 : 5,
+    initialEnemyCount: showcase ? 12 : newPlayerRamp ? 3 : 5,
     spawnTimer: 0.45,
     shotTimer: 0.1,
     performance: {
-      quality: PERFORMANCE_PROFILE.qualityCeiling,
-      qualityCeiling: PERFORMANCE_PROFILE.qualityCeiling,
-      qualityFloor: PERFORMANCE_PROFILE.qualityFloor,
+      quality: showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling,
+      qualityCeiling: showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling,
+      qualityFloor: showcase ? 1 : PERFORMANCE_PROFILE.qualityFloor,
       targetFps: PERFORMANCE_PROFILE.targetFps,
       slowFrames: 0,
       frameMs: 1000 / PERFORMANCE_PROFILE.targetFps,
     },
     pulseTimer: 0,
-    pulseMax: Math.max(14, 22 * (1 - meta.upgrades.pulse * .035)),
+    pulseMax: showcase ? 5 : Math.max(14, 22 * (1 - meta.upgrades.pulse * .035)),
     kills: 0,
     pickedXp: 0,
     coins: 0,
@@ -1644,7 +1639,7 @@ function makeGame(runType = "main") {
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
-    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · ${combatModel.weapon} · 初入仙域获得护道加持` : newPlayerRamp ? `${combatClass.name} · 先移动拾取经验，尸潮将在 8 秒后升压` : `${combatClass.name} · ${combatModel.weapon} · 靠近拾取经验`, time: 2.3 },
+    banner: { text: showcase ? "LV.MAX · 巅峰战力接入" : runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: showcase ? "满级神装 · 顶级联动 · 最高视觉精度，仅限训练局" : runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · ${combatModel.weapon} · 初入仙域获得护道加持` : newPlayerRamp ? `${combatClass.name} · 先移动拾取经验，尸潮将在 8 秒后升压` : `${combatClass.name} · ${combatModel.weapon} · 靠近拾取经验`, time: showcase ? 3.8 : 2.3 },
     player: {
       weapon,
       combatClass,
@@ -1698,6 +1693,75 @@ function makeGame(runType = "main") {
   };
 }
 
+function configureShowcaseBuild(state) {
+  const player = state.player;
+  state.maxHealth = 18888;
+  state.health = state.maxHealth;
+  state.invulnerable = 2.8;
+  state.pulseTimer = 0;
+  state.pulseMax = 5;
+  state.divineTrialActive = true;
+  state.divineAwakening = 2.15;
+  state.divineOverdrive = 180;
+  state.performance.quality = 1;
+  state.performance.qualityCeiling = 1;
+  state.performance.qualityFloor = 1;
+  player.damage = 1280;
+  player.fireInterval = .14;
+  player.bulletCount = 6;
+  player.pierce = 9;
+  player.explosionChance = .78;
+  player.explosionRadius = 92;
+  player.slowChance = .72;
+  player.critChance = .92;
+  player.pulseBonus = 3.2;
+  player.projectileLife = Math.max(2.4, player.projectileLife);
+  player.moveSpeed = Math.max(225, player.moveSpeed * 1.35);
+  player.level = 99;
+  player.xp = 0;
+  player.xpNeeded = 999999;
+  player.pickupRange = 260;
+  player.supportDroneLevel = 10;
+  player.supportDroneTimer = .05;
+  player.companionPet = petDefinitions.find((pet) => pet.id === "warHound") || null;
+  player.companionPetTimer = .08;
+  player.divineGearLevel = 99;
+  player.upgrades = { power: 5, haste: 5, multi: 3, pierce: 3, grenade: 3, frost: 3, crit: 5, hunter: 5 };
+  player.synergies = { "穿城弹链": true };
+  player.activeSynergy = sceneSkillGroups.city.ranger;
+  player.branchFocus = "primary";
+}
+
+function igniteShowcaseArrival() {
+  if (!game?.showcase) return;
+  const player = game.player;
+  const definition = divineGearDefinitions[player.combatClass.id];
+  createTerrainDeformation(player.x, player.y + 52, 178, { source: "ultimate", intensity: 1.38, life: 62, color: definition.primary });
+  for (let ring = 0; ring < 6; ring += 1) game.shockwaves.push({ x: player.x, y: player.y, radius: 8 + ring * 12, maxRadius: 150 + ring * 52, life: .86 + ring * .14, color: ring % 2 ? definition.secondary : definition.primary, lineWidth: 7 - ring * .6 });
+  makeDirectionalParticles(player.x, player.y, definition.primary, 110, 390, -Math.PI / 2, Math.PI * 2, "spark");
+  makeDirectionalParticles(player.x, player.y - 24, "#ffffff", 54, 260, -Math.PI / 2, Math.PI * 2, "glyph");
+  game.flash = 1;
+  game.shake = 20;
+  vibrateFeedback([35, 22, 80]);
+}
+
+function beginShowcaseBossPhase() {
+  if (!game?.showcase || mode !== "playing" || game.boss) return;
+  game.tutorial.step = "boss";
+  game.tutorial.active = true;
+  const boss = spawnBoss();
+  boss.skillTimer = .72;
+  ui.bossName.textContent = "终焉暴君 · 训练体";
+  game.invulnerable = Math.max(game.invulnerable, 1.4);
+  game.banner = { text: "终焉暴君 · 120 万生命", sub: "躲开红区，使用满级火力击穿首领", time: 4.2 };
+  createTerrainDeformation(boss.x, boss.y + 22, 138, { source: "boss", intensity: 1.42, life: 78, color: "#ff704f" });
+  makeDirectionalParticles(boss.x, boss.y, "#ff7959", 92, 340, Math.PI / 2, Math.PI * 2, "chip");
+  showTutorialCard({ step: 4, total: 5, section: "巅峰战力演练", icon: "BOSS", title: "压轴首领 · 终焉暴君", description: "这只训练首领拥有 1,200,000 生命与完整 AOE 地形破坏。红色区域必须躲避；你的满级神装、无人机、灵宠和穿城弹链会同时输出。", action: "击败首领完成训练…", waiting: true, combat: true, locked: true });
+  setTimeout(() => {
+    if (game?.showcase && game.tutorial?.step === "boss" && mode === "playing") hideTutorialCard();
+  }, 2400);
+}
+
 function openLoadout(runType = "main") {
   if (runType !== "petDungeon" && !isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
     showToast(getSceneLockedMessage());
@@ -1730,7 +1794,8 @@ function openLoadout(runType = "main") {
 
 async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (assetLaunchPending) return;
-  if (runType !== "petDungeon" && !isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
+  const showcase = runType === "tutorialShowcase";
+  if (runType !== "petDungeon" && !showcase && !isLevelUnlocked(selectedSceneIndex, selectedLevel)) {
     showToast(getSceneLockedMessage());
     return;
   }
@@ -1753,7 +1818,7 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (!assetsReady) showToast("部分素材仍在加载，已启用兼容占位并后台重试");
   unlockAudio();
   selectedRunClass = classId;
-  lastRunType = runType;
+  if (!showcase) lastRunType = runType;
   if (runType === "resource") {
     if (meta.dungeon.entries <= 0) { showToast("今日丰饶之境次数已用完"); return; }
     meta.dungeon.entries -= 1;
@@ -1762,18 +1827,22 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
     if (pendingPetEntryKind === "free") meta.petDungeon.freeEntries = Math.max(0, meta.petDungeon.freeEntries - 1);
     pendingPetEntryKind = null;
   }
-  if (!QA_MODE && !ADMIN_MODE) meta.energy.current -= energyCost;
-  meta.selectedClass = classId;
-  saveMeta();
+  if (!QA_MODE && !ADMIN_MODE && !showcase) meta.energy.current -= energyCost;
+  if (!showcase) {
+    meta.selectedClass = classId;
+    saveMeta();
+  }
   ui.loadoutModal.classList.add("hidden");
   game = makeGame(runType);
-  const launchTutorial = runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
-    && !meta.tutorial.completed && (tutorialFlow.battlePending || shouldAutoStartTutorial());
+  if (showcase) configureShowcaseBuild(game);
+  const launchTutorial = showcase || (runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
+    && !meta.tutorial.completed && (tutorialFlow.battlePending || shouldAutoStartTutorial()));
   for (let index = 0; index < game.initialEnemyCount; index += 1) {
     const type = index === game.initialEnemyCount - 1 && !game.newPlayerRamp ? "runner" : "grunt";
     spawnEnemy(type, null, null, index / game.initialEnemyCount * Math.PI * 2 - Math.PI / 2);
   }
   document.querySelector("#app").dataset.scene = game.scene.id;
+  document.querySelector("#app").dataset.showcase = String(showcase);
   mode = "playing";
   paused = false;
   manuallyPaused = false;
@@ -1792,13 +1861,56 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   ui.pulse.setAttribute("aria-label", `释放${ultimate.ultimateName}`);
   ui.bossName.textContent = game.scene.boss;
   syncHud();
+  if (showcase) igniteShowcaseArrival();
   if (launchTutorial) beginCombatTutorial();
   else hideTutorialCard();
   tone(225, 0.11, "sawtooth", 0.045, 1.5);
 }
 
+function finishShowcaseTutorial(won) {
+  hideTutorialCard();
+  mode = "result";
+  paused = true;
+  manuallyPaused = false;
+  if (won) {
+    meta.tutorial = { version: 2, completed: true };
+    tutorialFlow = { homeStep: 0, battlePending: false, featurePaused: false };
+    selectedSceneIndex = 0;
+    selectedLevel = 1;
+    lastRunType = "main";
+    saveMeta();
+  } else {
+    lastRunType = "tutorialShowcase";
+  }
+  ui.hud.classList.add("hidden");
+  ui.upgrade.classList.add("hidden");
+  ui.pauseOverlay.classList.add("hidden");
+  ui.result.classList.remove("hidden");
+  ui.resultBadge.textContent = won ? "巅峰战力演练 · 完成" : "巅峰战力演练 · 重试";
+  ui.resultBadge.classList.toggle("fail", !won);
+  ui.resultTitle.textContent = won ? "你已经见过这套游戏的巅峰火力" : "训练首领仍在等待";
+  ui.resultSubtitle.textContent = won
+    ? "临时满配权限已回收；正式第一关将回到 LV.1、初始属性、普通敌人和正常成长节奏。"
+    : "训练不会消耗体力，也不会写入养成数据；重新进入即可继续体验。";
+  ui.resultTime.textContent = formatTime(game.elapsed);
+  ui.resultKills.textContent = game.kills;
+  ui.resultCoins.textContent = "+0";
+  ui.resultLevel.textContent = won ? "MAX → 1" : "MAX";
+  ui.resultLoot.classList.remove("hidden");
+  ui.resultLoot.innerHTML = won
+    ? `<b>训练数据已隔离</b><span style="--rarity:#77f2ff">本局不发放金币、装备或通关进度</span><span style="--rarity:#d8ff7a">正式局：拾取经验 → 选择技能路径 → 击败首领</span><span style="--rarity:#ffd978">右侧功能：每日任务、活动、丰饶之境与商城</span>`
+    : `<b>巅峰权限仍为临时状态</b><span style="--rarity:#77f2ff">再次训练不会消耗体力</span>`;
+  ui.resultActionText.textContent = won ? "回归初始战力 · 正式出击" : "重新进入满配训练";
+  ui.retry.disabled = false;
+  tone(won ? 659 : 160, won ? .45 : .3, won ? "triangle" : "sawtooth", .065, won ? 1.45 : .7);
+}
+
 function finishGame(won) {
   if (mode !== "playing") return;
+  if (game?.showcase) {
+    finishShowcaseTutorial(won);
+    return;
+  }
   hideTutorialCard();
   mode = "result";
   paused = true;
@@ -1910,6 +2022,7 @@ function returnHome() {
   mode = "home";
   paused = false;
   game = null;
+  document.querySelector("#app").dataset.showcase = "false";
   ui.result.classList.add("hidden");
   ui.hud.classList.add("hidden");
   ui.pauseOverlay.classList.add("hidden");
@@ -2325,6 +2438,9 @@ function enemyStats(type) {
     boss: { hp: QA_MODE ? 320 : 1320 + game.missionLevel * 52, speed: QA_MODE ? 76 : 25, size: 74, damage: 28, reward: 65 + game.missionLevel * 3, xp: 80, color: palette[5] },
   };
   const base = entries[type];
+  if (type === "boss" && game.showcase) {
+    return { ...base, hp: 1200000, maxHp: 1200000, speed: 22, size: 94, damage: 220, reward: 0, xp: 0, realm: 1, divineFinaleGate: false };
+  }
   const divineFinaleGate = type === "boss" && game.sceneIndex === 0 && game.missionLevel === LEVELS_PER_SCENE && !getDivineGearState(game.player.combatClass.id).unlocked;
   const bossScale = game.difficulty * (game.missionLevel === LEVELS_PER_SCENE ? 1.28 : 1) * (divineFinaleGate ? 2.55 : 1);
   const realmOffset = game.scene.endless
@@ -2389,6 +2505,7 @@ function spawnBoss() {
     : { text: "警告 · 首领来袭", sub: `${bossName}正在接近`, time: 3.2 };
   game.shake = 9;
   tone(85, 0.5, "sawtooth", 0.06, 0.65);
+  return game.boss;
 }
 
 function announceWave(wave) {
@@ -3007,7 +3124,8 @@ function damagePlayer(rawDamage, sourceX, sourceY, heavy = false) {
   if (game.invulnerable > 0 || game.health <= 0) return false;
   const wardReduction = game.scene.endless ? Math.min(.58, game.player.wardLevel * .065) : 0;
   const damage = Math.max(1, Math.round(rawDamage * (1 - wardReduction)));
-  game.health = Math.max(0, game.health - damage);
+  const healthFloor = game.showcase ? Math.round(game.maxHealth * .12) : 0;
+  game.health = Math.max(healthFloor, game.health - damage);
   if (heavy) game.player.staggerTimer = Math.max(game.player.staggerTimer || 0, .62);
   game.shake = Math.max(game.shake, heavy ? 11 : 4);
   game.flash = heavy ? .23 : .15;
@@ -3341,8 +3459,14 @@ function activatePulse() {
   game.flash = .18;
   vibrateFeedback([45, 35, 80]);
   if (game.tutorial?.active && game.tutorial.step === "ultimate") {
-    game.tutorial.active = false;
-    completeTutorial(true);
+    if (game.showcase) {
+      game.tutorial.step = "bossPending";
+      showTutorialCard({ step: 3, total: 5, section: "巅峰战力演练", icon: "MAX", title: "终极火力已释放", description: "地形冲击和终极技能正在清场。训练首领即将落地，准备观察 BOSS 血条、AOE 红区与地图破坏反馈。", action: "首领降临中…", waiting: true, combat: true, locked: true });
+      setTimeout(beginShowcaseBossPhase, 850);
+    } else {
+      game.tutorial.active = false;
+      completeTutorial(true);
+    }
   }
 }
 
@@ -3665,6 +3789,15 @@ function syncHud() {
   ui.pulse.classList.toggle("ready", game.pulseTimer <= 0);
   ui.pulseCooldown.style.height = `${ratio * 100}%`;
   ui.pulseHint.textContent = game.pulseTimer > 0 ? `${game.pulseTimer.toFixed(1)} 秒` : "点击 / SPACE";
+  if (game.showcase) {
+    ui.mission.textContent = game.boss && !game.boss.dead ? "巅峰演练 · 击破终焉暴君" : "巅峰演练 · 熟悉满级战力";
+    ui.wave.textContent = "MAX";
+    ui.timer.textContent = "训练中";
+    ui.timer.previousElementSibling.textContent = "临时满配";
+    ui.level.textContent = "LV.MAX";
+    ui.xpFill.style.width = "100%";
+    ui.xpText.textContent = "正式局重置";
+  }
 }
 
 function togglePause(force) {
@@ -7285,10 +7418,10 @@ function applyPreferences(persist = true) {
   ui.mute.textContent = muted ? "×" : "⌁";
   ui.mute.setAttribute("aria-label", muted ? "开启音效" : "关闭音效");
   if (game) {
-    game.performance.qualityCeiling = PERFORMANCE_PROFILE.qualityCeiling;
-    game.performance.qualityFloor = PERFORMANCE_PROFILE.qualityFloor;
+    game.performance.qualityCeiling = game.showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling;
+    game.performance.qualityFloor = game.showcase ? 1 : PERFORMANCE_PROFILE.qualityFloor;
     game.performance.targetFps = PERFORMANCE_PROFILE.targetFps;
-    game.performance.quality = Math.min(PERFORMANCE_PROFILE.qualityCeiling, Math.max(PERFORMANCE_PROFILE.qualityFloor, game.performance.quality));
+    game.performance.quality = game.showcase ? 1 : Math.min(PERFORMANCE_PROFILE.qualityCeiling, Math.max(PERFORMANCE_PROFILE.qualityFloor, game.performance.quality));
     if (preferences.reduceMotion) game.shake = 0;
   }
   if (persist) savePreferences();
@@ -7418,7 +7551,7 @@ ui.guestLogin.addEventListener("click", () => {
   ui.home.classList.remove("hidden");
   switchHomePanel("command");
   tone(392, .18, "triangle", .035, 1.8);
-  if (shouldAutoStartTutorial()) setTimeout(() => showHomeTutorial(0), 240);
+  if (shouldAutoStartTutorial()) showHomeTutorial(0);
 });
 document.querySelectorAll("[data-login-provider]").forEach((button) => button.addEventListener("click", () => {
   showToast(`${button.dataset.loginProvider}登录接口已预留，原型阶段请先以游客进入`);
@@ -7433,9 +7566,20 @@ ui.tutorialReplay.addEventListener("click", () => {
   switchHomePanel("command");
   showHomeTutorial(0);
 });
-ui.tutorialSkip.addEventListener("click", () => completeTutorial(false));
+ui.tutorialSkip.addEventListener("click", () => {
+  if (game?.showcase || shouldAutoStartTutorial()) {
+    showToast("首次巅峰战力演练完成后，才会开放正式战斗");
+    return;
+  }
+  completeTutorial(false);
+});
 ui.start.addEventListener("click", () => openLoadout("main"));
 ui.retry.addEventListener("click", () => {
+  if (lastRunType === "tutorialShowcase") {
+    ui.result.classList.add("hidden");
+    startShowcaseTutorial();
+    return;
+  }
   if (lastRunType === "petDungeon") {
     ui.result.classList.add("hidden");
     returnHome();
@@ -7551,6 +7695,11 @@ ui.pause.addEventListener("click", () => togglePause());
 ui.pauseResume.addEventListener("click", () => togglePause(false));
 ui.pauseSettings.addEventListener("click", () => openSettings());
 ui.pauseExit.addEventListener("click", () => {
+  if (game?.showcase) {
+    togglePause(false);
+    showToast("巅峰战力演练完成后会自动回到正式第一关");
+    return;
+  }
   pointerMove.active = false;
   if (game) game.move = { x: 0, y: 0 };
   returnHome();
