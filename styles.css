@@ -1593,6 +1593,121 @@ h1 {
   50% { transform:translateX(-40%) translateY(-2px) scale(1.006);filter:drop-shadow(0 23px 19px rgba(0,0,0,.75)) drop-shadow(0 0 15px color-mix(in srgb,var(--cyan) 19%,transparent)); }
 }
 
+/* v82: every world now carries its own combat-instrument material language. */
+#app[data-scene="city"] {
+  --hud-glyph:"▰";--hud-caption:"URBAN / QUARANTINE";--hud-edge:#d8ff5d;--hud-second:#ffb34d;
+  --hud-clip:polygon(0 0,calc(100% - 13px) 0,100% 13px,100% 100%,13px 100%,0 calc(100% - 13px));
+  --hud-surface:linear-gradient(122deg,rgba(7,20,13,.96),rgba(17,35,24,.91)),repeating-linear-gradient(135deg,rgba(224,255,89,.13) 0 4px,transparent 4px 10px);
+  --hud-plate:linear-gradient(100deg,rgba(5,16,10,.92),rgba(23,39,25,.74),rgba(5,13,9,.88));
+  --hud-ultimate:linear-gradient(145deg,rgba(30,47,14,.98),rgba(11,24,15,.98));
+  --hud-motif:repeating-linear-gradient(135deg,rgba(255,192,62,.17) 0 5px,transparent 5px 13px);
+  --hud-hp-a:#ff4c42;--hud-hp-b:#ffb34d;--hud-xp-a:#78d936;--hud-xp-b:#d8ff5d;
+}
+#app[data-scene="snow"] {
+  --hud-glyph:"❄";--hud-caption:"POLAR / WHITEOUT";--hud-edge:#bcefff;--hud-second:#7acfff;
+  --hud-clip:polygon(9px 0,calc(100% - 9px) 0,100% 9px,100% calc(100% - 9px),calc(100% - 9px) 100%,9px 100%,0 calc(100% - 9px),0 9px);
+  --hud-surface:conic-gradient(from 215deg at 12% 125%,transparent 0 8%,rgba(211,248,255,.13) 8% 12%,transparent 12% 21%,rgba(125,215,255,.09) 21% 26%,transparent 26%),linear-gradient(120deg,rgba(5,23,36,.95),rgba(18,54,70,.9));
+  --hud-plate:linear-gradient(105deg,rgba(5,25,39,.91),rgba(40,83,101,.68),rgba(7,29,43,.9));
+  --hud-ultimate:linear-gradient(145deg,rgba(25,74,94,.98),rgba(5,25,41,.98));
+  --hud-motif:linear-gradient(120deg,transparent 18%,rgba(215,249,255,.2) 19% 20%,transparent 21% 48%,rgba(131,225,255,.15) 49% 50%,transparent 51%);
+  --hud-hp-a:#58c8ff;--hud-hp-b:#ecfdff;--hud-xp-a:#66d2ed;--hud-xp-b:#c6f7ff;
+}
+#app[data-scene="hospital"] {
+  --hud-glyph:"✚";--hud-caption:"BIO / STERILE FIELD";--hud-edge:#70ffd5;--hud-second:#f1ffff;
+  --hud-clip:polygon(0 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%);
+  --hud-surface:linear-gradient(rgba(85,255,206,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(85,255,206,.055) 1px,transparent 1px),linear-gradient(115deg,rgba(5,31,27,.97),rgba(16,65,55,.88));
+  --hud-plate:linear-gradient(105deg,rgba(5,28,25,.94),rgba(23,75,63,.71),rgba(5,25,22,.91));
+  --hud-ultimate:linear-gradient(145deg,rgba(15,77,63,.98),rgba(5,32,28,.98));
+  --hud-motif:radial-gradient(circle at 18% 50%,rgba(196,255,238,.22) 0 2px,transparent 3px),linear-gradient(90deg,transparent 42%,rgba(104,255,214,.13) 43% 57%,transparent 58%);
+  --hud-hp-a:#28d9a5;--hud-hp-b:#d7fff4;--hud-xp-a:#54e3bc;--hud-xp-b:#9effdf;
+}
+#app[data-scene="orbit"] {
+  --hud-glyph:"◉";--hud-caption:"ORBIT / BRIDGE LINK";--hud-edge:#a99cff;--hud-second:#65edff;
+  --hud-clip:polygon(15px 0,100% 0,100% calc(100% - 15px),calc(100% - 15px) 100%,0 100%,0 15px);
+  --hud-surface:radial-gradient(circle at 17% 23%,rgba(255,255,255,.5) 0 1px,transparent 1.5px),radial-gradient(circle at 72% 71%,rgba(108,231,255,.34) 0 1px,transparent 1.5px),linear-gradient(120deg,rgba(7,8,32,.97),rgba(31,27,82,.9));
+  --hud-plate:linear-gradient(105deg,rgba(7,8,31,.94),rgba(43,38,101,.72),rgba(8,10,38,.92));
+  --hud-ultimate:linear-gradient(145deg,rgba(54,44,130,.98),rgba(8,12,48,.98));
+  --hud-motif:repeating-linear-gradient(90deg,transparent 0 18px,rgba(126,226,255,.11) 18px 19px),repeating-linear-gradient(0deg,transparent 0 11px,rgba(169,156,255,.08) 11px 12px);
+  --hud-hp-a:#7565ff;--hud-hp-b:#73efff;--hud-xp-a:#8171ff;--hud-xp-b:#d1c9ff;
+}
+#app[data-scene="mars"] {
+  --hud-glyph:"△";--hud-caption:"MARS / FORWARD BASE";--hud-edge:#ffad58;--hud-second:#ff5c36;
+  --hud-clip:polygon(0 7px,7px 0,calc(100% - 18px) 0,100% 14px,100% 100%,12px 100%,0 calc(100% - 12px));
+  --hud-surface:radial-gradient(ellipse at 16% 120%,rgba(255,117,53,.23),transparent 37%),radial-gradient(circle at 83% 10%,rgba(255,197,115,.12),transparent 22%),linear-gradient(118deg,rgba(34,10,6,.98),rgba(77,28,18,.9));
+  --hud-plate:linear-gradient(105deg,rgba(38,11,7,.94),rgba(98,39,22,.72),rgba(36,12,8,.92));
+  --hud-ultimate:linear-gradient(145deg,rgba(105,35,16,.98),rgba(39,11,6,.98));
+  --hud-motif:repeating-linear-gradient(163deg,transparent 0 15px,rgba(255,137,66,.15) 16px 17px,transparent 18px 31px);
+  --hud-hp-a:#ff4b2f;--hud-hp-b:#ffc15f;--hud-xp-a:#d85d2e;--hud-xp-b:#ffb45f;
+}
+#app[data-scene="moon"] {
+  --hud-glyph:"◌";--hud-caption:"LUNA / SURFACE OPS";--hud-edge:#dddfff;--hud-second:#91cfff;
+  --hud-clip:polygon(11px 0,calc(100% - 11px) 0,100% 11px,100% calc(100% - 11px),calc(100% - 11px) 100%,11px 100%,0 calc(100% - 11px),0 11px);
+  --hud-surface:radial-gradient(circle at 89% 50%,transparent 0 12px,rgba(213,217,255,.13) 13px 14px,transparent 15px),repeating-linear-gradient(90deg,rgba(255,255,255,.025) 0 1px,transparent 1px 7px),linear-gradient(120deg,rgba(10,10,24,.97),rgba(43,43,68,.9));
+  --hud-plate:linear-gradient(105deg,rgba(11,11,25,.94),rgba(64,65,91,.7),rgba(14,14,29,.92));
+  --hud-ultimate:linear-gradient(145deg,rgba(61,62,94,.98),rgba(14,15,33,.98));
+  --hud-motif:radial-gradient(circle at 20% 50%,transparent 0 10px,rgba(204,234,255,.17) 11px 12px,transparent 13px),linear-gradient(90deg,transparent,rgba(231,230,255,.07),transparent);
+  --hud-hp-a:#8b8ee5;--hud-hp-b:#eef2ff;--hud-xp-a:#8fb5d8;--hud-xp-b:#dcecff;
+}
+#app[data-scene="cultivation"] {
+  --hud-glyph:"剑";--hud-caption:"太虚 / 问道无尽";--hud-edge:#e5cc84;--hud-second:#9be4cc;
+  --hud-clip:polygon(18px 0,calc(100% - 18px) 0,100% 50%,calc(100% - 18px) 100%,18px 100%,0 50%);
+  --hud-surface:radial-gradient(ellipse at 12% 40%,rgba(220,198,132,.16),transparent 28%),radial-gradient(ellipse at 80% 120%,rgba(68,124,105,.23),transparent 41%),linear-gradient(115deg,rgba(11,17,14,.97),rgba(32,43,34,.91));
+  --hud-plate:linear-gradient(105deg,rgba(10,16,13,.94),rgba(48,57,43,.7),rgba(12,18,15,.92));
+  --hud-ultimate:linear-gradient(145deg,rgba(61,52,29,.98),rgba(12,23,19,.98));
+  --hud-motif:radial-gradient(ellipse at 18% 70%,rgba(229,204,132,.18),transparent 29%),linear-gradient(112deg,transparent 46%,rgba(157,227,203,.13) 47% 48%,transparent 49%);
+  --hud-hp-a:#b08c45;--hud-hp-b:#f4dfa4;--hud-xp-a:#55aa8d;--hud-xp-b:#b9eedc;
+}
+
+.hud-top {
+  isolation:isolate;
+  border-color:color-mix(in srgb,var(--hud-edge) 50%,transparent);
+  border-radius:0;
+  clip-path:var(--hud-clip);
+  background:var(--hud-surface);
+  background-size:auto,20px 20px,auto;
+  box-shadow:inset 0 1px rgba(255,255,255,.08),inset 0 -1px color-mix(in srgb,var(--hud-edge) 18%,transparent),0 8px 24px rgba(0,0,0,.23);
+}
+.hud-top::before {
+  content:"";position:absolute;z-index:-1;inset:0;pointer-events:none;background:var(--hud-motif);opacity:.76;
+}
+.hud-top::after {
+  content:var(--hud-caption);position:absolute;right:9px;bottom:2px;color:color-mix(in srgb,var(--hud-edge) 61%,transparent);font-size:4.5px;font-weight:900;letter-spacing:.14em;pointer-events:none;
+}
+.hud-top > div { position:relative;z-index:1;border-right-color:color-mix(in srgb,var(--hud-edge) 13%,transparent); }
+.hud-top .wave-block { padding-left:44px; }
+.wave-block::before {
+  content:var(--hud-glyph);position:absolute;left:10px;top:7px;width:28px;height:29px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--hud-edge) 45%,transparent);clip-path:var(--hud-clip);color:var(--hud-edge);background:color-mix(in srgb,var(--hud-edge) 9%,transparent);font-size:15px;font-style:normal;font-weight:950;text-shadow:0 0 12px color-mix(in srgb,var(--hud-edge) 72%,transparent);box-shadow:inset 0 0 13px color-mix(in srgb,var(--hud-edge) 8%,transparent);
+}
+.bars {
+  min-height:42px;padding:4px 9px 5px;border:1px solid color-mix(in srgb,var(--hud-edge) 23%,transparent);border-left:2px solid var(--hud-edge);clip-path:var(--hud-clip);background:var(--hud-plate);box-shadow:inset 0 0 18px color-mix(in srgb,var(--hud-edge) 4%,transparent),0 7px 18px rgba(0,0,0,.18);
+}
+.bar { background:rgba(0,0,0,.58);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--hud-edge) 12%,transparent); }
+.health i { background:linear-gradient(90deg,var(--hud-hp-a),var(--hud-hp-b));box-shadow:0 0 10px color-mix(in srgb,var(--hud-hp-b) 42%,transparent); }
+.xp i { background:linear-gradient(90deg,var(--hud-xp-a),var(--hud-xp-b));box-shadow:0 0 10px color-mix(in srgb,var(--hud-xp-b) 38%,transparent); }
+.icon-button { border-color:color-mix(in srgb,var(--hud-edge) 27%,transparent);border-radius:8px;clip-path:var(--hud-clip);color:color-mix(in srgb,var(--hud-edge) 76%,white);background:var(--hud-plate);box-shadow:inset 0 0 12px color-mix(in srgb,var(--hud-edge) 5%,transparent),0 5px 14px rgba(0,0,0,.2); }
+.combo { color:color-mix(in srgb,var(--hud-edge) 70%,white);text-shadow:0 0 17px color-mix(in srgb,var(--hud-edge) 53%,transparent); }
+.combo span { color:var(--hud-edge); }
+.boss-hud { padding:6px 10px 7px;border:1px solid color-mix(in srgb,var(--hud-second) 27%,transparent);clip-path:var(--hud-clip);background:var(--hud-plate);box-shadow:0 7px 24px rgba(0,0,0,.29),inset 0 0 18px color-mix(in srgb,var(--hud-second) 5%,transparent); }
+.boss-hud span { color:color-mix(in srgb,var(--hud-second) 71%,white);text-shadow:0 0 11px color-mix(in srgb,var(--hud-second) 34%,transparent); }
+.boss-bar { border-color:color-mix(in srgb,var(--hud-second) 35%,transparent);background:rgba(0,0,0,.55); }
+.boss-bar i { background:linear-gradient(90deg,var(--hud-second),var(--hud-edge));box-shadow:0 0 10px color-mix(in srgb,var(--hud-second) 45%,transparent); }
+.pulse-button,.pulse-button[data-class-id="melee"],.pulse-button[data-class-id="ranger"],.pulse-button[data-class-id="mage"] {
+  isolation:isolate;border-color:color-mix(in srgb,var(--hud-edge) 62%,transparent);border-radius:0;clip-path:var(--hud-clip);background:var(--hud-ultimate);box-shadow:0 9px 30px color-mix(in srgb,var(--hud-edge) 17%,transparent),inset 0 0 23px color-mix(in srgb,var(--hud-edge) 8%,transparent);
+}
+.pulse-button::before { content:"";position:absolute;z-index:-1;inset:0;background:var(--hud-motif);opacity:.9;pointer-events:none; }
+.pulse-button::after { content:"";position:absolute;z-index:0;top:-40%;bottom:-40%;left:-36px;width:24px;transform:rotate(17deg);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--hud-edge) 34%,transparent),transparent);animation:hudUltimateSweep 3.8s ease-in-out infinite;pointer-events:none; }
+.pulse-button .pulse-icon,.pulse-button[data-class-id="melee"] .pulse-icon,.pulse-button[data-class-id="mage"] .pulse-icon { color:var(--hud-edge);text-shadow:0 0 14px color-mix(in srgb,var(--hud-edge) 74%,transparent); }
+.pulse-copy small { color:color-mix(in srgb,var(--hud-edge) 52%,#6b7770); }
+.pulse-button > i { background:color-mix(in srgb,var(--hud-edge) 13%,transparent);box-shadow:0 -2px 13px color-mix(in srgb,var(--hud-edge) 17%,transparent); }
+.pulse-button.ready { animation:themeUltimateReady 1.45s ease-in-out infinite; }
+.movement-hint { color:color-mix(in srgb,var(--hud-edge) 38%,transparent); }
+.movement-hint i { border-color:color-mix(in srgb,var(--hud-edge) 26%,transparent);color:color-mix(in srgb,var(--hud-edge) 70%,transparent);background:color-mix(in srgb,var(--ui-shell) 72%,transparent); }
+@keyframes hudUltimateSweep { 0%,52% { left:-36px;opacity:0; } 67% { opacity:1; } 92%,100% { left:190px;opacity:0; } }
+@keyframes themeUltimateReady { 50% { transform:translateX(-50%) scale(1.018);filter:brightness(1.13);box-shadow:0 10px 36px color-mix(in srgb,var(--hud-edge) 29%,transparent),inset 0 0 29px color-mix(in srgb,var(--hud-edge) 13%,transparent); } }
+
+.low-power-device .pulse-button::after { display:none; }
+.low-power-device .pulse-button.ready { animation:none; }
+
 .low-power-device * { backdrop-filter:none !important; }
 .low-power-device .home-glow,.low-power-device .lobby-atmosphere,.low-power-device .home-screen::after,.low-power-device .lobby-stage::after,.low-power-device .lobby-atmosphere::after,.low-power-device .lobby-world-portal,.low-power-device .lobby-world-portal::before,.low-power-device .lobby-world-portal i,.low-power-device .lobby-hero,.low-power-device .map-entry-button::after { animation:none !important; }
 .low-power-device #app { box-shadow:none; }
