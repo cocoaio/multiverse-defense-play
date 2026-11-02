@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "66";
+const ASSET_REVISION = "67";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -619,12 +619,26 @@ const bossPhaseThemes = {
   cultivation: ["宗主试剑", "道域全开", "万劫归一"],
 };
 
+const bossSignatureProfiles = {
+  city: { type: "mutantClaws", action: "暴君裂地", color: "#ff654f" },
+  snow: { type: "glacierFists", action: "冰拳震原", color: "#d9fbff" },
+  hospital: { type: "viralTendrils", action: "毒株增殖", color: "#8dffd3" },
+  orbit: { type: "carrierCannons", action: "母舰齐射", color: "#8cecff" },
+  mars: { type: "magmaHammer", action: "熔岩战槌", color: "#ff9b58" },
+  moon: { type: "gravityArms", action: "泰坦引力臂", color: "#d9d5ff" },
+  cultivation: { type: "swordHalo", action: "宗主剑轮", color: "#d8ffe0" },
+};
+
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
 }
 
 function getBossPhaseName(phase, sceneId = game?.scene?.id || "city") {
   return (bossPhaseThemes[sceneId] || bossPhaseThemes.city)[Math.max(0, Math.min(2, phase - 1))];
+}
+
+function getBossSignature(sceneId = game?.scene?.id || "city") {
+  return bossSignatureProfiles[sceneId] || bossSignatureProfiles.city;
 }
 
 const cultivationDomains = [
@@ -2542,6 +2556,9 @@ function spawnEnemy(type, x, y, forcedAngle) {
     bossSkillIndex: 0,
     bossPhase: type === "boss" ? 1 : 0,
     phaseTransition: 0,
+    bossActionAnim: 0,
+    bossReaction: 0,
+    bossReactionSide: 1,
     dashTimer: 0,
     slowTimer: 0,
     flash: 0,
@@ -3098,6 +3115,8 @@ function updateEnemies(dt) {
     enemy.rangedFlash = Math.max(0, (enemy.rangedFlash || 0) - dt);
     enemy.attackRecovery = Math.max(0, (enemy.attackRecovery || 0) - dt);
     enemy.phaseTransition = Math.max(0, (enemy.phaseTransition || 0) - dt);
+    enemy.bossActionAnim = Math.max(0, (enemy.bossActionAnim || 0) - dt);
+    enemy.bossReaction = Math.max(0, (enemy.bossReaction || 0) - dt);
     enemy.slowTimer = Math.max(0, enemy.slowTimer - dt);
     enemy.skillTimer -= dt;
     enemy.dashTimer = Math.max(0, enemy.dashTimer - dt);
@@ -3116,6 +3135,7 @@ function updateEnemies(dt) {
     }
     if (enemy.type === "boss" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 430) {
       const phase = enemy.bossPhase || 1;
+      enemy.bossActionAnim = 1.25;
       enemy.skillTimer = phase === 3 ? rand(3.45, 4.2) : phase === 2 ? rand(4, 5.05) : rand(4.8, 6.4);
       enemy.bossSkillIndex = (enemy.bossSkillIndex || 0) + 1;
       const radius = (game.scene.endless ? 118 : game.scene.id === "hospital" ? 104 : 112) + (phase - 1) * 9;
@@ -3133,7 +3153,7 @@ function updateEnemies(dt) {
       if (phase >= 3) queueBossStrike(enemy, targetX - sideX * radius * .94, targetY - sideY * radius * .94, radius * .82, delay + .24, damage, impact, phase);
       if (enemy.bossSkillIndex % 2 === 0) spawnEnemy(Math.random() < .5 ? "ranged" : "caster", enemy.x + rand(-42, 42), enemy.y + rand(-30, 22));
       const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
-      game.banner = { text: `${bossName} · ${getBossPhaseName(phase)} · ${impact.name}`, sub: `${phase} 重落点 · 命中损失 ${damage} 生命并陷入重创`, time: 1.45 };
+      game.banner = { text: `${bossName} · ${getBossSignature().action}`, sub: `${getBossPhaseName(phase)} · ${phase} 重${impact.name}落点 · 命中损失 ${damage} 生命`, time: 1.45 };
     }
     if (enemy.attackWindup > 0) {
       enemy.attackWindup = Math.max(0, enemy.attackWindup - dt);
@@ -3370,6 +3390,10 @@ function damageEnemy(enemy, amount, critical = false, secondary = false) {
   }
   enemy.hp -= amount;
   enemy.flash = 0.075;
+  if (enemy.type === "boss") {
+    enemy.bossReaction = Math.max(enemy.bossReaction || 0, critical ? .32 : secondary ? .12 : .21);
+    enemy.bossReactionSide = -(enemy.bossReactionSide || 1);
+  }
   const damageNumberReady = !game.showcase || !MOBILE_DEVICE || (enemy.nextDamageNumberAt || 0) <= game.elapsed;
   if (preferences.damageNumbers && damageNumberReady && (!secondary || Math.random() < 0.3)) {
     if (game.showcase && MOBILE_DEVICE) enemy.nextDamageNumberAt = game.elapsed + (LOW_POWER_DEVICE ? .16 : .1);
@@ -4679,6 +4703,7 @@ function render() {
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
+    drawBossPhaseTransitionOverlay();
     drawCinematicImpactOverlay();
     drawBossScreenShock();
     drawMovementGuide();
@@ -4731,6 +4756,37 @@ function drawBossScreenShock() {
   ctx.globalAlpha = .15 * strength;
   ctx.fillStyle = game.scene.colors.hit;
   for (let y = 0; y < H; y += 18) ctx.fillRect((y % 36 ? -1 : 1) * strength * 10, y, W, 3);
+  ctx.restore();
+}
+
+function drawBossPhaseTransitionOverlay() {
+  const boss = game.boss;
+  if (!boss || boss.dead || !(boss.phaseTransition > 0)) return;
+  const phase = boss.bossPhase || 1;
+  const progress = Math.max(0, Math.min(1, 1 - boss.phaseTransition / 1.35));
+  const alpha = Math.sin(progress * Math.PI);
+  const profile = getBossSignature();
+  game.bossPhaseOverlayRendered = true;
+  ctx.save();
+  ctx.fillStyle = `rgba(3,4,8,${(preferences.reduceMotion ? .08 : .18) * alpha})`;
+  ctx.fillRect(0, 0, W, H);
+  const bandHeight = 72;
+  const bandY = H * .54 - bandHeight / 2;
+  const slide = preferences.reduceMotion ? 0 : (1 - Math.min(1, progress * 3.2)) * W * .38;
+  if (LOW_POWER_DEVICE) {
+    ctx.fillStyle = `rgba(3,5,10,${.7 * alpha})`; ctx.fillRect(24, bandY, W - 48, bandHeight);
+  } else {
+    const band = ctx.createLinearGradient(0, bandY, W, bandY + bandHeight);
+    band.addColorStop(0, "rgba(3,5,10,0)"); band.addColorStop(.18, `rgba(3,5,10,${.82 * alpha})`); band.addColorStop(.82, `rgba(3,5,10,${.82 * alpha})`); band.addColorStop(1, "rgba(3,5,10,0)");
+    ctx.fillStyle = band; ctx.fillRect(0, bandY, W, bandHeight);
+  }
+  ctx.strokeStyle = colorAlpha(profile.color, .78 * alpha); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(26 + slide, bandY + 5); ctx.lineTo(W - 26 + slide, bandY + 5); ctx.moveTo(26 - slide, bandY + bandHeight - 5); ctx.lineTo(W - 26 - slide, bandY + bandHeight - 5); ctx.stroke();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = profile.color; ctx.font = "900 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(phase === 1 ? "BOSS ENCOUNTER" : `BOSS PHASE ${phase}`, W / 2, bandY + 19);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 22px system-ui"; ctx.fillText(`${game.scene.icon} ${getBossPhaseName(phase)}`, W / 2, bandY + 44);
+  ctx.fillStyle = colorAlpha(profile.color, .88); ctx.font = "800 9px system-ui"; ctx.fillText(profile.action, W / 2, bandY + 62);
   ctx.restore();
 }
 
@@ -5894,6 +5950,121 @@ function drawBossPhaseAura(enemy, s) {
   ctx.restore();
 }
 
+function drawBossSignatureLayer(enemy, s, pass) {
+  if (enemy.type !== "boss") return;
+  const profile = getBossSignature();
+  const phase = enemy.bossPhase || 1;
+  const active = enemy.bossActionAnim > 0;
+  const progress = active ? 1 - enemy.bossActionAnim / 1.25 : 0;
+  const strike = active ? Math.sin(Math.min(1, progress) * Math.PI) : Math.sin(ambienceTime * 2.1 + enemy.sway) * .08;
+  const breathe = Math.sin(ambienceTime * 2.4 + enemy.sway) * s * .035;
+  ctx.save();
+  ctx.globalAlpha = .76 + phase * .07;
+  if (allowExpensiveGlow()) { ctx.shadowColor = profile.color; ctx.shadowBlur = 7 + phase * 2; }
+
+  if (LOW_POWER_DEVICE) {
+    if (pass === "front" || (!active && !(enemy.phaseTransition > 0))) { ctx.restore(); return; }
+    ctx.strokeStyle = profile.color; ctx.fillStyle = colorAlpha(profile.color, .58); ctx.lineWidth = Math.max(2, s * .055); ctx.lineCap = "round";
+    const reach = s * (1.05 + strike * .28);
+    if (profile.type === "mutantClaws") {
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side*s*.28,-s*.18); ctx.lineTo(side*reach,s*(.24+strike*.28)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(side*reach,s*.2); ctx.lineTo(side*s*1.3,s*.04); ctx.stroke(); }
+    } else if (profile.type === "glacierFists") {
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.arc(side*reach,s*(.12+strike*.52),s*.28,0,Math.PI*2); ctx.fill(); }
+    } else if (profile.type === "viralTendrils") {
+      for (let arm=0;arm<4;arm+=1){const a=arm/4*Math.PI*2+ambienceTime*.22;ctx.beginPath();ctx.moveTo(Math.cos(a)*s*.3,Math.sin(a)*s*.3);ctx.lineTo(Math.cos(a)*reach,Math.sin(a)*reach);ctx.stroke();}
+    } else if (profile.type === "carrierCannons") {
+      ctx.beginPath();ctx.moveTo(-s*.2,-s*.35);ctx.lineTo(-reach,-s*.55);ctx.lineTo(-s*.34,s*.2);ctx.moveTo(s*.2,-s*.35);ctx.lineTo(reach,-s*.55);ctx.lineTo(s*.34,s*.2);ctx.stroke();
+    } else if (profile.type === "magmaHammer") {
+      ctx.save();ctx.rotate(-.7+strike*1.25);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(s*1.45,-s*.72);ctx.stroke();ctx.fillRect(s*1.12,-s*.94,s*.5,s*.42);ctx.restore();
+    } else if (profile.type === "gravityArms") {
+      for(const side of[-1,1]){ctx.beginPath();ctx.moveTo(side*s*.28,-s*.2);ctx.lineTo(side*s*.78,0);ctx.lineTo(side*reach,s*(.3+strike*.3));ctx.stroke();}
+    } else {
+      for(let blade=0;blade<5;blade+=1){const a=blade/5*Math.PI*2+ambienceTime*.35;ctx.save();ctx.rotate(a);ctx.beginPath();ctx.moveTo(0,-s*.72);ctx.lineTo(0,-reach);ctx.stroke();ctx.restore();}
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (profile.type === "mutantClaws") {
+    if (pass === "back") {
+      ctx.fillStyle = colorAlpha(profile.color, .45);
+      for (const side of [-1, 1]) for (let spike = 0; spike < 3; spike += 1) {
+        const y = -s * .66 + spike * s * .37;
+        ctx.beginPath(); ctx.moveTo(side * s * .34, y); ctx.lineTo(side * s * (1.02 + phase * .08), y - s * .2); ctx.lineTo(side * s * .56, y + s * .13); ctx.closePath(); ctx.fill();
+      }
+    } else {
+      ctx.strokeStyle = "#7b2725"; ctx.lineWidth = s * .22; ctx.lineCap = "round";
+      for (const side of [-1, 1]) {
+        const sweep = side * (.42 - strike * .72);
+        ctx.save(); ctx.rotate(sweep); ctx.beginPath(); ctx.moveTo(side * s * .2, -s * .22); ctx.lineTo(side * s * 1.05, s * (.12 + strike * .3)); ctx.stroke();
+        ctx.strokeStyle = "#f6c5a5"; ctx.lineWidth = Math.max(2, s * .045);
+        for (let claw = -1; claw <= 1; claw += 1) { ctx.beginPath(); ctx.moveTo(side * s * 1.02, s * (.03 + claw * .12)); ctx.lineTo(side * s * 1.38, s * (-.06 + claw * .16)); ctx.stroke(); }
+        ctx.restore();
+      }
+    }
+  } else if (profile.type === "glacierFists") {
+    if (pass === "back") {
+      ctx.fillStyle = colorAlpha("#74cfe9", .55);
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side*s*.28,-s*.72); ctx.lineTo(side*s*.88,-s*1.05); ctx.lineTo(side*s*.72,-s*.35); ctx.closePath(); ctx.fill(); }
+    } else {
+      for (const side of [-1, 1]) {
+        const x = side * s * (1.02 - strike * .46);
+        const y = s * (.05 + strike * .78) + breathe;
+        ctx.fillStyle = "#dffaff"; ctx.strokeStyle = "#79d7ef"; ctx.lineWidth = 3;
+        ctx.beginPath(); for (let point = 0; point < 6; point += 1) { const a = point/6*Math.PI*2; const r = s*(point%2?.32:.43); const px=x+Math.cos(a)*r; const py=y+Math.sin(a)*r; if (!point) ctx.moveTo(px,py); else ctx.lineTo(px,py); } ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+  } else if (profile.type === "viralTendrils") {
+    if (pass === "back") {
+      ctx.strokeStyle = profile.color; ctx.lineWidth = Math.max(3, s * .08); ctx.lineCap = "round";
+      for (let arm = 0; arm < 7; arm += 1) {
+        const angle = arm / 7 * Math.PI * 2 + ambienceTime * .28;
+        const length = s * (1.15 + phase * .12 + strike * .35);
+        ctx.beginPath(); ctx.moveTo(Math.cos(angle)*s*.35, Math.sin(angle)*s*.35);
+        ctx.bezierCurveTo(Math.cos(angle+.7)*length*.55, Math.sin(angle+.7)*length*.55, Math.cos(angle-.35)*length*.82, Math.sin(angle-.35)*length*.82, Math.cos(angle)*length, Math.sin(angle)*length); ctx.stroke();
+      }
+    } else {
+      ctx.fillStyle = colorAlpha("#f5fff7", .82);
+      for (let cell=0;cell<phase+2;cell+=1){const a=ambienceTime*(1.4+cell*.1)+cell*2.1;ctx.beginPath();ctx.arc(Math.cos(a)*s*.72,Math.sin(a)*s*.58,s*.08,0,Math.PI*2);ctx.fill();}
+    }
+  } else if (profile.type === "carrierCannons") {
+    if (pass === "back") {
+      const spread = .64 + strike * .34;
+      ctx.fillStyle = "#293b72"; ctx.strokeStyle = profile.color; ctx.lineWidth = 2;
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side*s*.22,-s*.4); ctx.lineTo(side*s*(1.58+strike*.18),-s*spread); ctx.lineTo(side*s*1.28,s*.34); ctx.lineTo(side*s*.28,s*.2); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+      ctx.fillStyle = "#eaffff";
+      for (const side of [-1,1]) for(let gun=0;gun<phase;gun+=1){ctx.fillRect(side*s*(.62+gun*.24)-s*.06,-s*(.53+gun*.03),s*.12,s*.28);}
+    } else {
+      ctx.strokeStyle = colorAlpha(profile.color, active ? .9 : .45); ctx.lineWidth = 3 + phase;
+      ctx.beginPath(); ctx.ellipse(0, s*.08, s*(.8+strike*.25), s*(.3+strike*.08), ambienceTime*.7, 0, Math.PI*2); ctx.stroke();
+    }
+  } else if (profile.type === "magmaHammer") {
+    if (pass === "back") {
+      const rotation = -.76 + strike * 1.36;
+      ctx.save(); ctx.rotate(rotation); ctx.strokeStyle = "#5d2b22"; ctx.lineWidth = s*.18; ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(-s*.08,s*.15); ctx.lineTo(s*1.45,-s*.72); ctx.stroke();
+      const lava=ctx.createLinearGradient(s*1.05,-s*.98,s*1.7,-s*.38);lava.addColorStop(0,"#4a211b");lava.addColorStop(.5,"#ff6a36");lava.addColorStop(1,"#ffd06b");ctx.fillStyle=lava;ctx.strokeStyle="#ffb05c";ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(s*1.02,-s*1.06,s*.72,s*.62,s*.12);ctx.fill();ctx.stroke();ctx.restore();
+    } else {
+      ctx.fillStyle=colorAlpha("#ff5b32",.3+strike*.35);ctx.beginPath();ctx.ellipse(0,s*.72,s*(.65+strike*.55),s*(.16+strike*.12),0,0,Math.PI*2);ctx.fill();
+    }
+  } else if (profile.type === "gravityArms") {
+    if (pass === "back") {
+      ctx.strokeStyle="#555577";ctx.lineWidth=s*.18;ctx.lineCap="round";
+      for(const side of[-1,1]){const reach=1+strike*.42;ctx.beginPath();ctx.moveTo(side*s*.3,-s*.24);ctx.lineTo(side*s*.82,-s*.02);ctx.lineTo(side*s*reach,s*(.28+strike*.35));ctx.stroke();ctx.fillStyle=profile.color;ctx.beginPath();ctx.arc(side*s*reach,s*(.28+strike*.35),s*.22,0,Math.PI*2);ctx.fill();}
+    } else {
+      ctx.strokeStyle=profile.color;ctx.lineWidth=2.5;
+      for(let ring=0;ring<phase;ring+=1){ctx.beginPath();ctx.ellipse(0,s*.04,s*(.72+ring*.2+strike*.18),s*(.22+ring*.06),ambienceTime*(ring%2?-.7:.7),0,Math.PI*2);ctx.stroke();}
+    }
+  } else if (profile.type === "swordHalo") {
+    if (pass === "back") {
+      const count = 5 + phase * 2;
+      for(let blade=0;blade<count;blade+=1){const a=blade/count*Math.PI*2+ambienceTime*(active?1.8:.45);const radius=s*(1.05+strike*.32);ctx.save();ctx.rotate(a);ctx.translate(0,-radius);ctx.rotate(Math.PI);ctx.fillStyle=blade%2?"#effff5":profile.color;ctx.beginPath();ctx.moveTo(0,-s*.42);ctx.lineTo(s*.07,s*.18);ctx.lineTo(0,s*.31);ctx.lineTo(-s*.07,s*.18);ctx.closePath();ctx.fill();ctx.fillStyle="#d9b76d";ctx.fillRect(-s*.12,s*.17,s*.24,s*.045);ctx.restore();}
+    } else {
+      ctx.strokeStyle=colorAlpha(profile.color,.7);ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,s*(.78+strike*.12),0,Math.PI*2);ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
@@ -5907,6 +6078,12 @@ function drawEnemy(enemy) {
   ctx.translate(enemy.x + Math.cos(kickAngle) * kick, enemy.y + Math.sin(kickAngle) * kick);
   ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
+  if (enemy.type === "boss" && enemy.bossReaction > 0) {
+    const reaction = Math.min(1, enemy.bossReaction / .32);
+    ctx.rotate((enemy.bossReactionSide || 1) * reaction * .075);
+    ctx.scale(1 + reaction * .06, 1 - reaction * .09);
+  }
+  drawBossSignatureLayer(enemy, s, "back");
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
   else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, frozen);
   else if (enemyAtlas.complete && enemyAtlas.naturalWidth) drawAtlasEnemy(enemy, s, frozen);
@@ -5918,6 +6095,7 @@ function drawEnemy(enemy) {
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
   if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
+  if (!LOW_POWER_DEVICE) drawBossSignatureLayer(enemy, s, "front");
 
   if (frozen) {
     ctx.strokeStyle = "rgba(151,235,255,.72)";
@@ -8251,6 +8429,11 @@ if (QA_MODE) {
         name: getBossPhaseName(game.boss.bossPhase || 1),
         transition: Number((game.boss.phaseTransition || 0).toFixed(2)),
         strikeCount: game.bossWarnings.filter((warning) => warning.sourceId === game.boss.id).length,
+        signature: getBossSignature().type,
+        actionName: getBossSignature().action,
+        action: Number((game.boss.bossActionAnim || 0).toFixed(2)),
+        reaction: Number((game.boss.bossReaction || 0).toFixed(2)),
+        overlayRendered: Boolean(game.bossPhaseOverlayRendered),
       } : null,
       enemySkills: {
         theme: game.scene.id,
