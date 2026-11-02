@@ -937,6 +937,21 @@ h1 {
 .privacy-details[open] summary i { transform:rotate(90deg); }
 .privacy-details p,.privacy-details ul { margin:0;padding:0 12px 10px;color:#7f8d85;font-size:7px;line-height:1.65; }
 .privacy-details ul { padding-left:27px; }
+.data-management { margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.065); }
+.data-actions { display:grid;grid-template-columns:1fr 1fr;gap:7px; }
+.data-actions > button { min-height:58px;display:grid;grid-template-columns:24px 1fr;align-items:center;gap:7px;padding:8px;border:1px solid rgba(112,225,255,.13);border-radius:11px;color:#d7e6e2;background:rgba(65,174,190,.05);text-align:left; }
+.data-actions > button > i { width:24px;height:24px;display:grid;place-items:center;border-radius:8px;color:#89eaff;background:rgba(75,202,225,.1);font-size:13px;font-style:normal; }
+.data-actions span { display:flex;min-width:0;flex-direction:column;gap:3px; }
+.data-actions b { font-size:8px; }
+.data-actions small { color:#70817a;font-size:6px;line-height:1.35; }
+.data-actions > button.danger { border-color:rgba(255,105,94,.13);background:rgba(180,53,43,.045); }
+.data-actions > button.danger > i { color:#ff948c;background:rgba(255,89,76,.09); }
+.data-reset-confirm { margin-top:8px;padding:11px;border:1px solid rgba(255,103,92,.24);border-radius:12px;background:rgba(75,17,15,.72); }
+.data-reset-confirm > b { color:#ffc0ba;font-size:9px; }
+.data-reset-confirm > p { margin:5px 0 9px;color:#ad8682;font-size:7px;line-height:1.5; }
+.data-reset-confirm > div { display:grid;grid-template-columns:1fr 1fr;gap:6px; }
+.data-reset-confirm button { min-height:31px;border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#abb8b1;background:rgba(255,255,255,.04);font-size:7px;font-weight:900; }
+.data-reset-confirm button:last-child { border-color:rgba(255,100,88,.28);color:#ffd4cf;background:rgba(172,49,40,.22); }
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation-duration:.001ms !important;animation-iteration-count:1 !important;scroll-behavior:auto !important; }
 .prototype-notice { padding: 8px 10px; border: 1px solid rgba(255,207,81,.18); border-radius: 9px; background: rgba(255,202,70,.06); color: #e5c56a; font-size: 8px; }
 .coin-packs { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin: 14px 0 10px; }

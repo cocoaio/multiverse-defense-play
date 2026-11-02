@@ -27,7 +27,7 @@
       if (mobile) document.documentElement.classList.add("mobile-device");
       if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=52" />
+    <link rel="stylesheet" href="./styles.css?v=53" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -363,6 +363,18 @@
               <li>正式上架前会提供完整隐私政策、账号注销和数据删除入口。</li>
             </ul>
           </details>
+          <section class="data-management" aria-labelledby="dataManagementTitle">
+            <div class="settings-heading"><span id="dataManagementTitle">本机数据管理</span><small id="settingsDataStatus">游客存档</small></div>
+            <div class="data-actions">
+              <button id="exportSaveButton"><i>⇩</i><span><b>导出存档备份</b><small>下载 JSON 文件，不上传网络</small></span></button>
+              <button id="resetSaveButton" class="danger"><i>×</i><span><b>清除本机数据</b><small>删除游客进度与游戏设置</small></span></button>
+            </div>
+            <div id="dataResetConfirm" class="data-reset-confirm hidden" role="alertdialog" aria-labelledby="dataResetTitle">
+              <b id="dataResetTitle">确认清除全部本机数据？</b>
+              <p>此操作无法撤销。建议先导出存档备份。</p>
+              <div><button id="cancelResetButton">取消</button><button id="confirmResetButton">确认清除</button></div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -380,6 +392,6 @@
       </section>
     </main>
 
-    <script defer src="./game.js?v=52"></script>
+    <script defer src="./game.js?v=53"></script>
   </body>
 </html>

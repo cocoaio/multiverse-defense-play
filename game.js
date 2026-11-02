@@ -292,6 +292,12 @@ const ui = {
   qualityChoices: $("#qualityChoices"),
   privacyLink: $("#privacyLink"),
   privacyDetails: $("#privacyDetails"),
+  settingsDataStatus: $("#settingsDataStatus"),
+  exportSave: $("#exportSaveButton"),
+  resetSave: $("#resetSaveButton"),
+  dataResetConfirm: $("#dataResetConfirm"),
+  cancelReset: $("#cancelResetButton"),
+  confirmReset: $("#confirmResetButton"),
   adminBadge: $("#adminBadge"),
   commanderRole: $("#commanderRoleText"),
   energyButton: $("#energyButton"),
@@ -6836,6 +6842,8 @@ function renderSettings() {
     button.setAttribute("aria-pressed", String(enabled));
     button.querySelector("i").textContent = enabled ? "开启" : "关闭";
   });
+  const cleared = scenes.reduce((sum, scene) => sum + Math.min(LEVELS_PER_SCENE, meta.progress?.[scene.id] || 0), 0);
+  ui.settingsDataStatus.textContent = ADMIN_MODE ? "管理员独立存档" : `游客存档 · 已通关 ${cleared}`;
 }
 
 function applyPreferences(persist = true) {
@@ -6862,7 +6870,38 @@ function openSettings(showPrivacy = false) {
 }
 
 function closeSettings() {
+  ui.dataResetConfirm.classList.add("hidden");
   ui.settingsModal.classList.add("hidden");
+}
+
+function exportLocalSave() {
+  const payload = {
+    product: "多元防线",
+    format: "multiverse-defense-local-backup-v1",
+    exportedAt: new Date().toISOString(),
+    saveKey: STORAGE_KEY,
+    save: meta,
+    preferences,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `multiverse-defense-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  showToast("本机存档备份已导出");
+}
+
+function clearLocalData() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PREFERENCES_KEY);
+  } finally {
+    location.reload();
+  }
 }
 
 function vibrateFeedback(pattern) {
@@ -7108,6 +7147,10 @@ ui.settingsModal.querySelectorAll("[data-setting]").forEach((button) => {
     applyPreferences();
   });
 });
+ui.exportSave.addEventListener("click", exportLocalSave);
+ui.resetSave.addEventListener("click", () => ui.dataResetConfirm.classList.remove("hidden"));
+ui.cancelReset.addEventListener("click", () => ui.dataResetConfirm.classList.add("hidden"));
+ui.confirmReset.addEventListener("click", clearLocalData);
 
 function updatePointerMovement(event) {
   if (!game || mode !== "playing" || paused) return;
