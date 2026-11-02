@@ -104,6 +104,13 @@ button {
 .loading-bytes em { color:#7ee8d1;font-style:normal; }
 .loading-note { max-width:304px;margin:20px 0 0;color:#789088;font-size:8px;line-height:1.7;text-align:center; }
 .loading-retry,.offline-download { margin-top:14px;padding:10px 15px;border:1px solid rgba(128,255,220,.22);border-radius:11px;color:#dffff7;background:rgba(44,151,126,.13);font-size:8px;font-weight:900;text-decoration:none; }
+.loading-recovery { width:100%;margin-top:13px;display:grid;grid-template-columns:1fr 1fr;gap:7px; }
+.loading-recovery .loading-retry,.loading-continue { min-height:44px;margin:0;padding:8px;border-radius:11px;font-size:8px;font-weight:900; }
+.loading-continue { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1px solid rgba(255,201,91,.18);color:#f0d793;background:rgba(156,99,27,.1); }
+.loading-continue small { color:#8f7d5d;font-size:6px; }
+.loading-screen.degraded .loading-track i { background:linear-gradient(90deg,#d99a44,#f4df82);box-shadow:0 0 18px rgba(255,190,84,.4); }
+.loading-screen.degraded .loading-emblem b { color:#ffe39a;text-shadow:0 0 24px rgba(255,189,78,.45); }
+.asset-degraded-mode .opening-keyart::after { content:"兼容画质";position:absolute;z-index:4;right:14px;bottom:14px;padding:4px 7px;border:1px solid rgba(255,213,126,.2);border-radius:7px;color:#e6cd91;background:rgba(23,18,9,.7);font-size:6px;font-weight:900;letter-spacing:.08em; }
 .offline-download { margin-top:9px;color:#8db6ac;background:transparent; }
 .offline-download small { margin-left:4px;color:#607c75; }
 
@@ -113,6 +120,8 @@ button {
   inset: 0;
   z-index: 5;
 }
+
+#loadingScreen { z-index: 80; }
 
 .home-screen {
   padding: max(34px, env(safe-area-inset-top)) 22px max(18px, env(safe-area-inset-bottom));

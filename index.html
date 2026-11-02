@@ -27,7 +27,7 @@
       if (mobile) document.documentElement.classList.add("mobile-device");
       if (lowPower) document.documentElement.classList.add("compat-assets", "low-power-device");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=54" />
+    <link rel="stylesheet" href="./styles.css?v=55" />
   </head>
   <body>
     <main id="app" data-scene="city" aria-label="多元防线游戏">
@@ -42,9 +42,12 @@
           <div class="loading-track"><i id="loadingFill"></i></div>
           <div class="loading-bytes"><span id="loadingBytes">0.00 / 0.00 MB</span><em id="loadingProfile">自动画质</em></div>
         </div>
-        <p class="loading-note">地图、独立角色、敌人与宠物全部就绪后才会进入。仅使用本次在线加载，不建立离线资源缓存。</p>
-        <button id="loadingRetry" class="loading-retry hidden">重新加载失败资源</button>
-        <a class="offline-download" href="./downloads/multiverse-defense-offline-v46.zip" download>下载本地试玩包 <small>弱网备用</small></a>
+        <p id="loadingNote" class="loading-note">地图、独立角色、敌人与宠物全部就绪后才会进入。网络波动时会自动重试，不建立离线资源缓存。</p>
+        <div id="loadingRecovery" class="loading-recovery hidden">
+          <button id="loadingRetry" class="loading-retry">重新加载失败资源</button>
+          <button id="loadingContinue" class="loading-continue">以兼容画面进入 <small>缺失素材将在后台补载</small></button>
+        </div>
+        <a class="offline-download" href="./downloads/multiverse-defense-offline-v55.zip" download>下载本地试玩包 <small>v55 · 弱网备用</small></a>
       </section>
 
       <section id="loginScreen" class="screen login-screen" aria-label="登录多元防线">
@@ -392,6 +395,6 @@
       </section>
     </main>
 
-    <script defer src="./game.js?v=54"></script>
+    <script defer src="./game.js?v=55"></script>
   </body>
 </html>

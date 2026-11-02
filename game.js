@@ -170,9 +170,13 @@ async function preloadAllGameAssets() {
   const label = document.querySelector("#loadingLabel");
   const profile = document.querySelector("#loadingProfile");
   const retry = document.querySelector("#loadingRetry");
+  const continueButton = document.querySelector("#loadingContinue");
+  const recovery = document.querySelector("#loadingRecovery");
+  const note = document.querySelector("#loadingNote");
   const assets = Object.entries(BOOT_ASSET_SIZES).map(([path, size]) => ({ path, size }));
   const total = assets.reduce((sum, entry) => sum + entry.size, 0);
   let completed = 0;
+  let degraded = false;
   const partial = new Map();
   const render = (name = "") => {
     const loaded = Math.min(total, completed + [...partial.values()].reduce((sum, value) => sum + value, 0));
@@ -187,41 +191,52 @@ async function preloadAllGameAssets() {
 
   async function loadOne(entry) {
     const displayName = entry.path.split("/").pop();
-    partial.set(entry.path, 0);
-    render(displayName);
-    try {
-      if (location.protocol === "file:") {
-        const ready = await assignBootAsset(entry, entry.path);
-        if (!ready) throw new Error(`decode failed: ${entry.path}`);
-      } else {
-        const response = await fetch(entry.path, { cache: "no-store" });
-        if (!response.ok) throw new Error(`${response.status}: ${entry.path}`);
-        const reader = response.body?.getReader();
-        const chunks = [];
-        let received = 0;
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            received += value.byteLength;
-            partial.set(entry.path, Math.min(entry.size, received));
-            render(displayName);
-          }
-        } else chunks.push(new Uint8Array(await response.arrayBuffer()));
-        const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
-        const objectUrl = URL.createObjectURL(blob);
-        const ready = await assignBootAsset(entry, objectUrl);
-        if (!ready) throw new Error(`decode failed: ${entry.path}`);
-      }
-      partial.delete(entry.path);
-      completed += entry.size;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      partial.set(entry.path, 0);
       render(displayName);
-      return true;
-    } catch (error) {
-      partial.delete(entry.path);
-      return false;
+      let objectUrl = "";
+      try {
+        if (location.protocol === "file:") {
+          const ready = await assignBootAsset(entry, entry.path);
+          if (!ready) throw new Error(`decode failed: ${entry.path}`);
+        } else {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), LOW_POWER_DEVICE ? 26000 : 21000);
+          const retrySuffix = attempt ? `${entry.path.includes("?") ? "&" : "?"}retry=${Date.now()}` : "";
+          const response = await fetch(entry.path + retrySuffix, { cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timeout));
+          if (!response.ok) throw new Error(`${response.status}: ${entry.path}`);
+          const reader = response.body?.getReader();
+          const chunks = [];
+          let received = 0;
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              received += value.byteLength;
+              partial.set(entry.path, Math.min(entry.size, received));
+              render(displayName);
+            }
+          } else chunks.push(new Uint8Array(await response.arrayBuffer()));
+          const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+          objectUrl = URL.createObjectURL(blob);
+          const ready = await assignBootAsset(entry, objectUrl);
+          if (!ready) throw new Error(`decode failed: ${entry.path}`);
+        }
+        partial.delete(entry.path);
+        completed += entry.size;
+        render(displayName);
+        return true;
+      } catch (error) {
+        partial.delete(entry.path);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        if (attempt === 0) {
+          label.textContent = `${displayName} 网络波动 · 自动重试`;
+          await new Promise((resolve) => setTimeout(resolve, 380));
+        }
+      }
     }
+    return false;
   }
 
   const queue = [...assets];
@@ -234,15 +249,31 @@ async function preloadAllGameAssets() {
   };
   await Promise.all(Array.from({ length: LOW_POWER_DEVICE ? 2 : 4 }, worker));
   if (failed.length) {
-    label.textContent = `${failed.length} 个素材未完成，请重试`;
-    retry.classList.remove("hidden");
-    await new Promise((resolve) => retry.addEventListener("click", resolve, { once: true }));
-    retry.classList.add("hidden");
-    return preloadAllGameAssets();
+    const failedMegabytes = failed.reduce((sum, entry) => sum + entry.size, 0) / 1048576;
+    label.textContent = `${failed.length} 个素材未完成`;
+    note.textContent = `网络未能完成 ${(failedMegabytes).toFixed(2)} MB 素材。可重试完整画面，或先用兼容画面进入游戏。`;
+    recovery.classList.remove("hidden");
+    const decision = await new Promise((resolve) => {
+      const cleanup = () => { retry.removeEventListener("click", onRetry); continueButton.removeEventListener("click", onContinue); };
+      const onRetry = () => { cleanup(); resolve("retry"); };
+      const onContinue = () => { cleanup(); resolve("continue"); };
+      retry.addEventListener("click", onRetry);
+      continueButton.addEventListener("click", onContinue);
+    });
+    recovery.classList.add("hidden");
+    if (decision === "retry") return preloadAllGameAssets();
+    document.documentElement.classList.add("asset-degraded-mode", "low-power-device");
+    screen.classList.add("degraded");
+    degraded = true;
+    window.__assetLoadReport = { mode: "degraded", failed: failed.map((entry) => entry.path) };
+    label.textContent = "兼容画面已就绪 · 后台继续补载";
+    profile.textContent = "兼容画质 · 30 FPS";
+    completed = total;
+    render();
   }
   completed = total;
   render();
-  label.textContent = "七界素材已就绪";
+  label.textContent = degraded ? "兼容画面已就绪" : "七界素材已就绪";
   await new Promise((resolve) => setTimeout(resolve, 260));
   screen.classList.add("ready");
   await new Promise((resolve) => setTimeout(resolve, 430));
