@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "71";
+const ASSET_REVISION = "72";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -639,6 +639,16 @@ const bossDefeatProfiles = {
   cultivation: { title: "道域破灭", detail: "宗主剑轮尽碎，残余灵气回归修士", mode: "ascend", color: "#ddffe4" },
 };
 
+const bossDamageProfiles = {
+  city: { mode: "fleshArmor", label: "血肉破甲", primary: "#ff6a55", secondary: "#53191b" },
+  snow: { mode: "icePlate", label: "冰甲崩裂", primary: "#d8fbff", secondary: "#4f9eb8" },
+  hospital: { mode: "membraneRupture", label: "毒膜溃破", primary: "#8bffd1", secondary: "#226d58" },
+  orbit: { mode: "hullBreach", label: "舰体失压", primary: "#83eaff", secondary: "#182d59" },
+  mars: { mode: "magmaCrack", label: "岩甲熔裂", primary: "#ff9b58", secondary: "#55241c" },
+  moon: { mode: "ceramicFracture", label: "月甲断层", primary: "#d8d4ff", secondary: "#393758" },
+  cultivation: { mode: "daoFracture", label: "道衣破损", primary: "#ddffe4", secondary: "#77613a" },
+};
+
 const corpseDeathProfiles = {
   city: { mode: "gore", color: "#9d4d43" },
   snow: { mode: "freeze", color: "#c9f5ff" },
@@ -673,6 +683,10 @@ function getBossSignature(sceneId = game?.scene?.id || "city") {
 
 function getBossDefeatProfile(sceneId = game?.scene?.id || "city") {
   return bossDefeatProfiles[sceneId] || bossDefeatProfiles.city;
+}
+
+function getBossDamageProfile(sceneId = game?.scene?.id || "city") {
+  return bossDamageProfiles[sceneId] || bossDamageProfiles.city;
 }
 
 function getCorpseDeathProfile(sceneId = game?.scene?.id || "city") {
@@ -2697,6 +2711,9 @@ function spawnEnemy(type, x, y, forcedAngle) {
     bossActionAnim: 0,
     bossReaction: 0,
     bossReactionSide: 1,
+    bossDamageStage: 0,
+    bossDamagePulse: 0,
+    bossDamageRendered: false,
     dashTimer: 0,
     slowTimer: 0,
     flash: 0,
@@ -3251,6 +3268,8 @@ function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
 function activateBossPhase(enemy, phase) {
   if (enemy.bossPhase >= phase) return;
   enemy.bossPhase = phase;
+  enemy.bossDamageStage = Math.max(enemy.bossDamageStage || 0, phase - 1);
+  enemy.bossDamagePulse = 1.15;
   enemy.phaseTransition = 1.35;
   enemy.skillTimer = Math.min(enemy.skillTimer, .65);
   const phaseName = getBossPhaseName(phase);
@@ -3285,6 +3304,7 @@ function updateEnemies(dt) {
     enemy.phaseTransition = Math.max(0, (enemy.phaseTransition || 0) - dt);
     enemy.bossActionAnim = Math.max(0, (enemy.bossActionAnim || 0) - dt);
     enemy.bossReaction = Math.max(0, (enemy.bossReaction || 0) - dt);
+    enemy.bossDamagePulse = Math.max(0, (enemy.bossDamagePulse || 0) - dt);
     enemy.slowTimer = Math.max(0, enemy.slowTimer - dt);
     enemy.skillTimer -= dt;
     enemy.dashTimer = Math.max(0, enemy.dashTimer - dt);
@@ -3294,6 +3314,7 @@ function updateEnemies(dt) {
     if (enemy.type === "boss") {
       const healthRatio = Math.max(0, enemy.hp / Math.max(1, enemy.maxHp));
       const nextPhase = healthRatio <= .32 ? 3 : healthRatio <= .68 ? 2 : 1;
+      enemy.bossDamageStage = Math.max(enemy.bossDamageStage || 0, nextPhase - 1);
       if (nextPhase > (enemy.bossPhase || 1)) activateBossPhase(enemy, nextPhase);
     }
     if (enemy.type === "runner" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 300) {
@@ -6346,6 +6367,7 @@ function drawBossDemise(demise) {
   ctx.rotate(Math.sin(stagger * Math.PI * 4) * (1 - stagger) * .1 + fall * fallAngle);
   ctx.scale(1 + stagger * .05, Math.max(.12, 1 - fall * .3 - dissolve * .48));
   ctx.globalAlpha = Math.max(0, 1 - dissolve * .92);
+  drawBossDamageState(demise, s, "back");
   drawBossSignatureLayer(demise, s, "back");
   if (game.scene.id === "cultivation") drawCultivationEnemy(demise, s, false);
   else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(demise, s, false);
@@ -6357,6 +6379,7 @@ function drawBossDemise(demise) {
     if (game.scene.id === "mars") drawMartianEnemy(demise, s, false);
     if (game.scene.id === "moon") drawLunarEnemy(demise, s, false);
   }
+  drawBossDamageState(demise, s, "front");
   if (!LOW_POWER_DEVICE) drawBossSignatureLayer(demise, s, "front");
   ctx.restore();
 
@@ -6427,9 +6450,99 @@ function drawEnemyAttackCue(enemy, s) {
   ctx.restore();
 }
 
+function drawBossDamageState(enemy, s, pass) {
+  if (enemy.type !== "boss") return;
+  const healthStage = enemy.hp / Math.max(1, enemy.maxHp) <= .32 ? 2 : enemy.hp / Math.max(1, enemy.maxHp) <= .68 ? 1 : 0;
+  const stage = Math.max(enemy.bossDamageStage || 0, healthStage);
+  if (stage <= 0) return;
+  const profile = getBossDamageProfile();
+  const pulse = Math.min(1, (enemy.bossDamagePulse || 0) / 1.15);
+  enemy.bossDamageStage = stage;
+  enemy.bossDamageRendered = true;
+  if (pass === "back") enemy.bossDamageBackRendered = true;
+  else enemy.bossDamageFrontRendered = true;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (pass === "back") {
+    const leakCount = LOW_POWER_DEVICE ? 1 : stage + 1;
+    ctx.globalCompositeOperation = allowExpensiveGlow() ? "lighter" : "source-over";
+    for (let leak = 0; leak < leakCount; leak += 1) {
+      const side = leak % 2 ? 1 : -1;
+      const x = side * s * (.3 + leak * .13);
+      const y = -s * (.2 + leak * .18);
+      const drift = Math.sin(ambienceTime * (1.5 + leak * .2) + enemy.sway + leak) * s * .18;
+      if (LOW_POWER_DEVICE) ctx.strokeStyle = colorAlpha(profile.primary, .32 + pulse * .18);
+      else {
+        const trail = ctx.createLinearGradient(x, y, x + drift, y - s * (.72 + stage * .18));
+        trail.addColorStop(0, colorAlpha(profile.primary, .42 + pulse * .25));
+        trail.addColorStop(1, colorAlpha(profile.primary, 0));
+        ctx.strokeStyle = trail;
+      }
+      ctx.lineWidth = stage === 2 ? 5 : 3;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x - drift * .3, y - s*.2, x + drift * .6, y - s*.48, x + drift, y - s*(.72 + stage*.18)); ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  const glow = LOW_POWER_DEVICE ? 0 : 7 + stage * 5 + pulse * 9;
+  if (glow && allowExpensiveGlow()) { ctx.shadowColor = profile.primary; ctx.shadowBlur = glow; }
+  const left = -s * .34;
+  const right = s * .3;
+  const upper = -s * .58;
+  const lower = s * .22;
+  if (profile.mode === "fleshArmor") {
+    ctx.fillStyle = colorAlpha(profile.secondary, .88);
+    ctx.beginPath(); ctx.ellipse(left, upper, s*.24, s*(.1 + stage*.035), -.48, 0, Math.PI*2); ctx.fill();
+    if (stage >= 2) { ctx.beginPath(); ctx.ellipse(right, -s*.08, s*.29, s*.13, .35, 0, Math.PI*2); ctx.fill(); }
+    ctx.strokeStyle = profile.primary; ctx.lineWidth = 2.4 + stage;
+    for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side*s*.08,-s*.72);ctx.lineTo(side*s*.2,-s*.34);ctx.lineTo(side*s*.05,-s*.05);ctx.lineTo(side*s*.28,s*.32);ctx.stroke(); }
+  } else if (profile.mode === "icePlate") {
+    ctx.fillStyle = colorAlpha("#102e42", .72);
+    ctx.beginPath(); ctx.moveTo(-s*.5,-s*.63);ctx.lineTo(-s*.12,-s*.82);ctx.lineTo(s*.04,-s*.42);ctx.lineTo(-s*.3,-s*.18);ctx.closePath();ctx.fill();
+    ctx.strokeStyle = profile.primary; ctx.lineWidth = 2;
+    for (let crack = 0; crack < 3 + stage; crack += 1) { const x = -s*.12 + crack*s*.1; ctx.beginPath();ctx.moveTo(x,-s*.7);ctx.lineTo(x+s*(crack%2?.18:-.14),-s*.3);ctx.lineTo(x+s*(crack%2?-.08:.12),s*.05);ctx.stroke(); }
+    if (stage >= 2) { ctx.fillStyle=colorAlpha("#dffaff",.38);ctx.beginPath();ctx.moveTo(s*.08,-s*.48);ctx.lineTo(s*.5,-s*.34);ctx.lineTo(s*.33,s*.15);ctx.lineTo(s*.02,-s*.02);ctx.closePath();ctx.fill(); }
+  } else if (profile.mode === "membraneRupture") {
+    for (let lesion = 0; lesion < 2 + stage; lesion += 1) { const angle=enemy.sway+lesion*2.2;const x=Math.cos(angle)*s*.38;const y=-s*.22+Math.sin(angle)*s*.34;ctx.fillStyle=colorAlpha(profile.secondary,.78);ctx.beginPath();ctx.arc(x,y,s*(.13+lesion*.025),0,Math.PI*2);ctx.fill();ctx.strokeStyle=profile.primary;ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,s*(.2+stage*.035),angle,angle+Math.PI*1.45);ctx.stroke(); }
+    ctx.strokeStyle=colorAlpha("#effff9",.82);ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(left,upper);ctx.bezierCurveTo(0,-s*.18,-s*.2,s*.08,right,lower);ctx.stroke();
+  } else if (profile.mode === "hullBreach") {
+    ctx.fillStyle = "rgba(3,8,17,.92)"; ctx.strokeStyle = profile.primary; ctx.lineWidth = 2.3;
+    ctx.beginPath();ctx.moveTo(-s*.48,-s*.5);ctx.lineTo(-s*.12,-s*.7);ctx.lineTo(s*.05,-s*.36);ctx.lineTo(-s*.15,-s*.06);ctx.lineTo(-s*.5,-s*.18);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.strokeStyle=stage>=2?"#ff9a5e":"#9bf3ff";ctx.lineWidth=1.6;
+    for(let wire=0;wire<2+stage;wire+=1){ctx.beginPath();ctx.moveTo(-s*.14,-s*.3+wire*s*.12);ctx.bezierCurveTo(s*.12,-s*.42+wire*s*.09,s*.04,s*.02+wire*s*.08,s*.38,s*.1+wire*s*.04);ctx.stroke();}
+    if(stage>=2){ctx.fillStyle=colorAlpha("#ff613d",.72);ctx.fillRect(s*.14,-s*.56,s*.34,s*.08);}
+  } else if (profile.mode === "magmaCrack") {
+    ctx.strokeStyle = profile.secondary; ctx.lineWidth = 7; ctx.beginPath();ctx.moveTo(-s*.18,-s*.78);ctx.lineTo(s*.04,-s*.38);ctx.lineTo(-s*.12,-s*.05);ctx.lineTo(s*.26,s*.35);ctx.stroke();
+    ctx.strokeStyle = profile.primary; ctx.lineWidth = 2.3 + stage; ctx.beginPath();ctx.moveTo(-s*.18,-s*.78);ctx.lineTo(s*.04,-s*.38);ctx.lineTo(-s*.12,-s*.05);ctx.lineTo(s*.26,s*.35);ctx.stroke();
+    if(stage>=2){ctx.beginPath();ctx.moveTo(s*.04,-s*.38);ctx.lineTo(s*.45,-s*.6);ctx.moveTo(-s*.12,-s*.05);ctx.lineTo(-s*.48,s*.18);ctx.stroke();}
+  } else if (profile.mode === "ceramicFracture") {
+    ctx.fillStyle=colorAlpha(profile.secondary,.86);ctx.strokeStyle=profile.primary;ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(left,upper);ctx.lineTo(s*.05,-s*.68);ctx.lineTo(s*.18,-s*.25);ctx.lineTo(-s*.12,-s*.05);ctx.lineTo(-s*.48,-s*.2);ctx.closePath();ctx.fill();ctx.stroke();
+    for(let crack=0;crack<3+stage;crack+=1){const angle=-1.25+crack*.55;ctx.beginPath();ctx.moveTo(-s*.08,-s*.32);ctx.lineTo(-s*.08+Math.cos(angle)*s*(.42+crack*.05),-s*.32+Math.sin(angle)*s*(.42+crack*.05));ctx.stroke();}
+    if(stage>=2){ctx.fillStyle=colorAlpha("#8fe7ff",.8);ctx.beginPath();ctx.arc(s*.3,s*.05,s*.09,0,Math.PI*2);ctx.fill();}
+  } else {
+    ctx.strokeStyle = profile.primary; ctx.lineWidth = 2.2 + stage;
+    ctx.beginPath();ctx.moveTo(-s*.5,-s*.64);ctx.lineTo(-s*.12,-s*.28);ctx.lineTo(-s*.36,s*.18);ctx.moveTo(s*.42,-s*.7);ctx.lineTo(s*.14,-s*.22);ctx.lineTo(s*.4,s*.28);ctx.stroke();
+    ctx.fillStyle = colorAlpha("#07140c", .72);
+    ctx.beginPath();ctx.moveTo(-s*.32,-s*.46);ctx.lineTo(-s*.05,-s*.24);ctx.lineTo(-s*.2,s*.16);ctx.lineTo(-s*.46,-s*.06);ctx.closePath();ctx.fill();
+    if(stage>=2){ctx.strokeStyle="#fff1b8";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(s*.05,-s*.62);ctx.lineTo(s*.42,s*.18);ctx.moveTo(s*.32,-s*.16);ctx.lineTo(s*.56,-s*.32);ctx.stroke();}
+  }
+  ctx.shadowBlur = 0;
+  ctx.globalCompositeOperation = "source-over";
+  if (pulse > 0) {
+    ctx.strokeStyle = colorAlpha(profile.primary, pulse * .75); ctx.lineWidth = 2 + pulse * 5;
+    ctx.beginPath(); ctx.arc(0, -s*.2, s*(.7 + (1-pulse)*.42), 0, Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawBossPhaseAura(enemy, s) {
   if (enemy.type !== "boss") return;
   const phase = enemy.bossPhase || 1;
+  const damageStage = enemy.bossDamageStage || 0;
+  const damageProfile = getBossDamageProfile();
   const transition = Math.min(1, (enemy.phaseTransition || 0) / 1.35);
   const color = phase === 3 ? "#ff4d6d" : phase === 2 ? game.scene.colors.hit : game.scene.colors.shot;
   ctx.save();
@@ -6448,9 +6561,11 @@ function drawBossPhaseAura(enemy, s) {
   ctx.setLineDash([]);
   ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = "rgba(7,5,10,.88)"; ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.roundRect(-38, -s * 1.78, 76, 21, 8); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ffffff"; ctx.font = "900 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(`P${phase} · ${getBossPhaseName(phase)}`, 0, -s * 1.78 + 10.5);
+  const plateHeight = damageStage > 0 ? 31 : 21;
+  ctx.beginPath(); ctx.roundRect(-48, -s * 1.78, 96, plateHeight, 8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.font = "900 9px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(`P${phase} · ${getBossPhaseName(phase)}`, 0, -s * 1.78 + (damageStage > 0 ? 9 : 10.5));
+  if (damageStage > 0) { ctx.fillStyle = damageProfile.primary; ctx.font = "850 8px system-ui"; ctx.fillText(`${damageStage === 2 ? "重度" : "局部"} · ${damageProfile.label}`, 0, -s * 1.78 + 22); }
   ctx.restore();
 }
 
@@ -6650,6 +6765,7 @@ function drawEnemy(enemy) {
     ctx.rotate((enemy.bossReactionSide || 1) * reaction * .075);
     ctx.scale(1 + reaction * .06, 1 - reaction * .09);
   }
+  drawBossDamageState(enemy, s, "back");
   drawBossSignatureLayer(enemy, s, "back");
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
   else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, frozen);
@@ -6662,6 +6778,7 @@ function drawEnemy(enemy) {
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
   drawEnemyHitReactionLayer(enemy, s, reactionPulse);
+  drawBossDamageState(enemy, s, "front");
   if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
   if (!LOW_POWER_DEVICE) drawBossSignatureLayer(enemy, s, "front");
 
@@ -9028,6 +9145,10 @@ if (QA_MODE) {
         action: Number((game.boss.bossActionAnim || 0).toFixed(2)),
         reaction: Number((game.boss.bossReaction || 0).toFixed(2)),
         overlayRendered: Boolean(game.bossPhaseOverlayRendered),
+        damageStage: game.boss.bossDamageStage || 0,
+        damageMode: getBossDamageProfile().mode,
+        damageLabel: getBossDamageProfile().label,
+        damageRendered: Boolean(game.boss.bossDamageRendered && game.boss.bossDamageBackRendered && game.boss.bossDamageFrontRendered),
       } : null,
       victorySequence: game.victorySequence ? {
         stage: game.victorySequence.stage,
