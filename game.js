@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "67";
+const ASSET_REVISION = "68";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -629,6 +629,16 @@ const bossSignatureProfiles = {
   cultivation: { type: "swordHalo", action: "宗主剑轮", color: "#d8ffe0" },
 };
 
+const bossDefeatProfiles = {
+  city: { title: "暴君失衡", detail: "血肉装甲崩裂，街区威胁解除", mode: "collapse", color: "#ff6a55" },
+  snow: { title: "冰核破碎", detail: "巨兽冻结成晶，随后崩解为霜尘", mode: "shatter", color: "#d8fbff" },
+  hospital: { title: "毒株失活", detail: "超级病毒膜溶解，污染指数归零", mode: "dissolve", color: "#8bffd1" },
+  orbit: { title: "母舰解体", detail: "核心熄火，残骸脱离空间站轨道", mode: "wreck", color: "#83eaff" },
+  mars: { title: "熔核冷却", detail: "赤岩酋长龟裂，熔岩重新凝固", mode: "crumble", color: "#ff9b58" },
+  moon: { title: "泰坦停机", detail: "引力臂失压，远古核心进入静默", mode: "shutdown", color: "#d8d4ff" },
+  cultivation: { title: "道域破灭", detail: "宗主剑轮尽碎，残余灵气回归修士", mode: "ascend", color: "#ddffe4" },
+};
+
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
 }
@@ -639,6 +649,10 @@ function getBossPhaseName(phase, sceneId = game?.scene?.id || "city") {
 
 function getBossSignature(sceneId = game?.scene?.id || "city") {
   return bossSignatureProfiles[sceneId] || bossSignatureProfiles.city;
+}
+
+function getBossDefeatProfile(sceneId = game?.scene?.id || "city") {
+  return bossDefeatProfiles[sceneId] || bossDefeatProfiles.city;
 }
 
 const cultivationDomains = [
@@ -1694,6 +1708,9 @@ function makeGame(runType = "main") {
     bossSpawned: false,
     lastBossWave: 0,
     boss: null,
+    bossDemise: null,
+    victorySequence: null,
+    bossPhaseOverlayRendered: false,
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
@@ -2110,6 +2127,14 @@ function update(dt) {
   game.banner.time = Math.max(0, game.banner.time - dt);
   game.comboTimer -= dt;
   if (game.comboTimer <= 0) game.combo = 0;
+  if (game.victorySequence) {
+    updateVictorySequence(dt);
+    if (mode !== "playing") return;
+    updateXpDrops(dt);
+    updateEffects(dt);
+    syncHud();
+    return;
+  }
   updatePlayerMovement(dt);
   updateDivineDelivery(dt);
   updateCultivationAbilities(dt);
@@ -2185,7 +2210,12 @@ function updateXpDrops(dt) {
       game.pickedXp += 1;
       gainXp(drop.value);
       makeParticles(drop.x, drop.y, drop.color, 5, 70);
-      tone(520 + Math.min(220, drop.value * 7), .045, "sine", .012, 1.3);
+      if (game.victorySequence) {
+        game.victorySequence.pickupToneCount += 1;
+        if (game.victorySequence.pickupToneCount % 6 === 1) tone(520 + Math.min(220, drop.value * 7), .045, "sine", .012, 1.3);
+      } else {
+        tone(520 + Math.min(220, drop.value * 7), .045, "sine", .012, 1.3);
+      }
     }
   }
   game.xpDrops = game.xpDrops.filter((drop) => !drop.collected);
@@ -3408,6 +3438,101 @@ function damageEnemy(enemy, amount, critical = false, secondary = false) {
   if (enemy.hp <= 0) killEnemy(enemy);
 }
 
+function beginBossVictorySequence(enemy) {
+  if (game.victorySequence) return;
+  const profile = getBossDefeatProfile();
+  const drops = game.xpDrops;
+  game.bossDemise = {
+    ...enemy,
+    dead: false,
+    hp: enemy.maxHp,
+    shield: 0,
+    flash: 0,
+    hitKick: 0,
+    bossReaction: 0,
+    attackWindup: 0,
+    attackWindupMax: 0,
+    bossActionAnim: 0,
+    phaseTransition: 0,
+    time: 3.5,
+    maxTime: 3.5,
+    defeatMode: profile.mode,
+  };
+  game.victorySequence = {
+    time: 0,
+    duration: 3.5,
+    stage: "stagger",
+    initialDrops: drops.length,
+    absorbed: 0,
+    xpValue: drops.reduce((sum, drop) => sum + drop.value, 0),
+    particleTimer: 0,
+    pickupToneCount: 0,
+    completed: false,
+    profile,
+  };
+  for (const drop of drops) drop.victorySeed = Math.random() * Math.PI * 2;
+  game.enemies.length = 0;
+  game.enemyProjectiles.length = 0;
+  game.bossWarnings.length = 0;
+  game.bullets.length = 0;
+  game.missionCompleteQueued = true;
+  game.boss = null;
+  game.move.x = 0;
+  game.move.y = 0;
+  game.banner = { text: profile.title, sub: profile.detail, time: 3.4 };
+  game.shake = preferences.reduceMotion ? 4 : 16;
+  game.flash = Math.max(game.flash, .42);
+  game.bossShock = Math.max(game.bossShock, preferences.reduceMotion ? .12 : .68);
+  game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 12, maxRadius: 190, life: .9, maxLife: .9, color: profile.color, lineWidth: 7 });
+  tone(74, .55, "sawtooth", .055, .48);
+  vibrateFeedback([55, 35, 95]);
+}
+
+function updateVictorySequence(dt) {
+  const sequence = game.victorySequence;
+  if (!sequence || sequence.completed) return;
+  sequence.time += dt;
+  if (game.bossDemise) game.bossDemise.time = Math.max(0, game.bossDemise.maxTime - sequence.time);
+  sequence.stage = sequence.time < .58 ? "stagger" : sequence.time < 1.65 ? "collapse" : sequence.time < 2.8 ? "absorb" : "summary";
+
+  sequence.particleTimer -= dt;
+  if (sequence.particleTimer <= 0 && game.bossDemise) {
+    sequence.particleTimer = LOW_POWER_DEVICE ? .16 : .085;
+    const demise = game.bossDemise;
+    const angle = rand(0, Math.PI * 2);
+    makeDirectionalParticles(demise.x + Math.cos(angle) * demise.size * .55, demise.y + Math.sin(angle) * demise.size * .42, sequence.profile.color, LOW_POWER_DEVICE ? 2 : 4, 118, angle, .8, ["shatter", "crumble", "wreck"].includes(sequence.profile.mode) ? "shard" : sequence.profile.mode === "ascend" ? "glyph" : "spark");
+  }
+
+  if (sequence.time >= .72) {
+    const player = game.player;
+    for (const drop of game.xpDrops) {
+      const dx = player.x - drop.x;
+      const dy = player.y - drop.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const tangentX = -dy / distance;
+      const tangentY = dx / distance;
+      const spiral = Math.sin(sequence.time * 8 + drop.victorySeed) * Math.min(95, distance * .24);
+      const speed = Math.min(980, 240 + sequence.time * 205 + distance * 1.15);
+      drop.x += (dx / distance * speed + tangentX * spiral) * dt;
+      drop.y += (dy / distance * speed + tangentY * spiral) * dt;
+      drop.age = Math.max(drop.age, .23);
+    }
+  }
+  sequence.absorbed = Math.max(0, sequence.initialDrops - game.xpDrops.length);
+
+  if (sequence.time >= sequence.duration) {
+    if (game.xpDrops.length) {
+      const remainingXp = game.xpDrops.reduce((sum, drop) => sum + drop.value, 0);
+      game.pickedXp += game.xpDrops.length;
+      gainXp(remainingXp);
+      sequence.absorbed = sequence.initialDrops;
+      game.xpDrops.length = 0;
+    }
+    sequence.completed = true;
+    finishGame(true);
+  }
+}
+
 function killEnemy(enemy) {
   if (enemy.dead) return;
   enemy.dead = true;
@@ -3415,6 +3540,7 @@ function killEnemy(enemy) {
   game.coins += Math.max(1, Math.round(enemy.reward * (1 + game.player.coinBonus)));
   game.combo = game.comboTimer > 0 ? game.combo + 1 : 1;
   game.comboTimer = 1.4;
+  const bossVictoryReady = enemy.type === "boss" && !game.scene.endless && (game.showcase || game.kills >= game.missionTarget);
   const permanentRecovery = meta.upgrades.recovery || 0;
   if (permanentRecovery > 0) {
     const recovery = Math.max(1, Math.round(game.maxHealth * permanentRecovery * (enemy.type === "boss" ? .012 : .0011)));
@@ -3457,19 +3583,21 @@ function killEnemy(enemy) {
     game.medkits.push({ x: enemy.x + rand(-9,9), y: enemy.y + rand(-7,7), age: 0, pulse: rand(0, Math.PI * 2), collected: false });
     addFloater(enemy.x, enemy.y - enemy.size - 4, "急救血包", "#7dffac", 9);
   }
-  if (game.corpses.length >= EFFECT_LIMITS.corpses) game.corpses.shift();
-  game.corpses.push({
-    x: enemy.x,
-    y: enemy.y,
-    size: enemy.size,
-    type: enemy.type,
-    color: enemy.color,
-    sceneId: game.scene.id,
-    rotation: rand(-.45, .45),
-    life: enemy.type === "boss" ? 6 : 4.2,
-    maxLife: enemy.type === "boss" ? 6 : 4.2,
-    seed: Math.random() * 100,
-  });
+  if (!bossVictoryReady) {
+    if (game.corpses.length >= EFFECT_LIMITS.corpses) game.corpses.shift();
+    game.corpses.push({
+      x: enemy.x,
+      y: enemy.y,
+      size: enemy.size,
+      type: enemy.type,
+      color: enemy.color,
+      sceneId: game.scene.id,
+      rotation: rand(-.45, .45),
+      life: enemy.type === "boss" ? 6 : 4.2,
+      maxLife: enemy.type === "boss" ? 6 : 4.2,
+      seed: Math.random() * 100,
+    });
+  }
   makeParticles(enemy.x, enemy.y, enemy.color, enemy.type === "boss" ? 36 : 10, enemy.type === "boss" ? 180 : 105);
 
   const stage = game.sceneIndex * LEVELS_PER_SCENE + game.missionLevel;
@@ -3491,16 +3619,16 @@ function killEnemy(enemy) {
   }
 
   if (enemy.type === "boss") {
-    game.boss = null;
     game.shake = 18;
     game.flash = 0.35;
     if (game.scene.endless) {
+      game.boss = null;
       game.banner = { text: "宗主败退", sub: "更高阶的修士正在踏入战场", time: 2.6 };
       game.bossSpawned = false;
     } else {
       game.missionBossDefeated = true;
-      if (game.kills >= game.missionTarget) { game.missionCompleteQueued = true; setTimeout(() => finishGame(true), 650); }
-      else game.banner = { text: "首领已击败", sub: `继续完成任务：还需击杀 ${game.missionTarget - game.kills} 名敌人`, time: 3.1 };
+      if (bossVictoryReady) beginBossVictorySequence(enemy);
+      else { game.boss = null; game.banner = { text: "首领已击败", sub: `继续完成任务：还需击杀 ${game.missionTarget - game.kills} 名敌人`, time: 3.1 }; }
     }
   } else if (!game.scene.endless && game.missionBossDefeated && !game.missionCompleteQueued && game.kills >= game.missionTarget) {
     game.missionCompleteQueued = true;
@@ -3685,7 +3813,7 @@ function gainXp(amount) {
     tone(440, .16, "sine", .04, 1.7);
     setTimeout(() => tone(660, .2, "sine", .035, 1.45), 90);
   }
-  if (game.pendingLevels > 0 && !paused) showUpgradeChoices();
+  if (game.pendingLevels > 0 && !paused && !game.victorySequence) showUpgradeChoices();
 }
 
 function showUpgradeChoices() {
@@ -4703,6 +4831,7 @@ function render() {
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
+    drawVictorySequenceOverlay();
     drawBossPhaseTransitionOverlay();
     drawCinematicImpactOverlay();
     drawBossScreenShock();
@@ -4756,6 +4885,31 @@ function drawBossScreenShock() {
   ctx.globalAlpha = .15 * strength;
   ctx.fillStyle = game.scene.colors.hit;
   for (let y = 0; y < H; y += 18) ctx.fillRect((y % 36 ? -1 : 1) * strength * 10, y, W, 3);
+  ctx.restore();
+}
+
+function drawVictorySequenceOverlay() {
+  const sequence = game.victorySequence;
+  if (!sequence || sequence.completed) return;
+  sequence.overlayRendered = true;
+  const progress = Math.min(1, sequence.time / sequence.duration);
+  const appear = Math.min(1, sequence.time / .3);
+  const label = sequence.stage === "stagger" ? "致命一击" : sequence.stage === "collapse" ? sequence.profile.title : sequence.stage === "absorb" ? "战场经验回收" : "战绩确认";
+  const detail = sequence.stage === "absorb"
+    ? `${sequence.absorbed} / ${sequence.initialDrops} 份经验已吸收`
+    : sequence.stage === "summary" ? `击杀 ${game.kills} · 用时 ${formatTime(game.elapsed)}` : sequence.profile.detail;
+  ctx.save();
+  ctx.globalAlpha = appear;
+  ctx.strokeStyle = colorAlpha(sequence.profile.color, .72); ctx.lineWidth = 2;
+  ctx.strokeRect(12, 12, W - 24, H - 24);
+  const y = H * .68;
+  ctx.fillStyle = "rgba(3,5,9,.82)"; ctx.beginPath(); ctx.roundRect(38, y, W - 76, 72, 12); ctx.fill();
+  ctx.strokeStyle = sequence.profile.color; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(38, y, W - 76, 72, 12); ctx.stroke();
+  ctx.fillStyle = sequence.profile.color; ctx.font = "950 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("BOSS DEFEATED", W/2, y + 15);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 21px system-ui"; ctx.fillText(label, W/2, y + 36);
+  ctx.fillStyle = "rgba(235,246,255,.78)"; ctx.font = "750 9px system-ui"; ctx.fillText(detail, W/2, y + 56);
+  ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(50, y + 66, W - 100, 2);
+  ctx.fillStyle = sequence.profile.color; ctx.fillRect(50, y + 66, (W - 100) * progress, 2);
   ctx.restore();
 }
 
@@ -5092,10 +5246,14 @@ function drawCultivationBackdrop() {
 
 function drawBattlefield() {
   ctx.save();
-  const zoom = game.camera?.zoom || 1;
+  const sequence = game.victorySequence;
+  const focusProgress = sequence ? Math.min(1, sequence.time / .55) : 0;
+  const focusX = sequence && game.bossDemise ? game.player.x + (game.bossDemise.x - game.player.x) * .38 * focusProgress : game.player.x;
+  const focusY = sequence && game.bossDemise ? game.player.y + (game.bossDemise.y - game.player.y) * .32 * focusProgress : game.player.y;
+  const zoom = (game.camera?.zoom || 1) * (sequence ? 1 + .045 * focusProgress : 1);
   ctx.translate(W / 2, H / 2);
   ctx.scale(zoom, zoom);
-  ctx.translate(-game.player.x, -game.player.y);
+  ctx.translate(-focusX, -focusY);
   drawWorldDecor();
   for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
   for (const wave of game.shockwaves) {
@@ -5137,6 +5295,7 @@ function drawBattlefield() {
     else if (actor.companion) drawCompanionPet();
     else drawEnemy(actor);
   }
+  if (game.bossDemise) drawBossDemise(game.bossDemise);
   for (const projectile of game.enemyProjectiles) if (isWorldPointVisible(projectile.x, projectile.y, 36)) drawEnemyProjectile(projectile);
   for (const bullet of game.bullets) if (isWorldPointVisible(bullet.x, bullet.y, 48)) drawBullet(bullet);
   for (const burst of game.impactBursts) if (isWorldPointVisible(burst.x, burst.y, 54)) drawImpactBurst(burst);
@@ -5876,6 +6035,60 @@ function drawCorpse(corpse) {
     ctx.globalAlpha = fade * (1 - i / 11);
     ctx.fillStyle = corpse.sceneId === "city" ? "#984943" : corpse.color;
     ctx.beginPath(); ctx.arc(Math.cos(a) * distance, Math.sin(a) * distance - dissolve * s * .6, Math.max(1, s * .045), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBossDemise(demise) {
+  const sequence = game.victorySequence;
+  if (!sequence) return;
+  const progress = Math.max(0, Math.min(1, sequence.time / sequence.duration));
+  const stagger = Math.min(1, progress / .18);
+  const fall = Math.max(0, Math.min(1, (progress - .16) / .48));
+  const dissolve = Math.max(0, Math.min(1, (progress - .58) / .38));
+  const s = demise.size;
+  const wreck = ["wreck", "shutdown"].includes(demise.defeatMode);
+  const ascend = demise.defeatMode === "ascend";
+  const fallAngle = wreck ? 1.18 : ascend ? -.08 : .82;
+  ctx.save();
+  ctx.translate(demise.x, demise.y + (ascend ? -fall * s * .72 : fall * s * .58));
+  ctx.rotate(Math.sin(stagger * Math.PI * 4) * (1 - stagger) * .1 + fall * fallAngle);
+  ctx.scale(1 + stagger * .05, Math.max(.12, 1 - fall * .3 - dissolve * .48));
+  ctx.globalAlpha = Math.max(0, 1 - dissolve * .92);
+  drawBossSignatureLayer(demise, s, "back");
+  if (game.scene.id === "cultivation") drawCultivationEnemy(demise, s, false);
+  else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(demise, s, false);
+  else if (enemyAtlas.complete && enemyAtlas.naturalWidth) drawAtlasEnemy(demise, s, false);
+  else {
+    if (game.scene.id === "city" || game.scene.id === "snow") drawHumanoidEnemy(demise, s, false, game.scene.id === "snow");
+    if (game.scene.id === "hospital") drawPathogenEnemy(demise, s, false);
+    if (game.scene.id === "orbit") drawVoidEnemy(demise, s, false);
+    if (game.scene.id === "mars") drawMartianEnemy(demise, s, false);
+    if (game.scene.id === "moon") drawLunarEnemy(demise, s, false);
+  }
+  if (!LOW_POWER_DEVICE) drawBossSignatureLayer(demise, s, "front");
+  ctx.restore();
+
+  const fragmentCount = LOW_POWER_DEVICE ? 5 : 11;
+  ctx.save(); ctx.translate(demise.x, demise.y);
+  for (let index = 0; index < fragmentCount; index += 1) {
+    const angle = demise.sway + index * 2.17;
+    const distance = s * (.28 + dissolve * (1.1 + index % 3 * .24));
+    const x = Math.cos(angle) * distance;
+    const y = Math.sin(angle) * distance * .58 - (ascend ? dissolve * s * 1.2 : 0);
+    ctx.globalAlpha = Math.max(0, dissolve * (1 - index / (fragmentCount + 2)));
+    ctx.fillStyle = index % 3 ? sequence.profile.color : "#ffffff";
+    if (["shatter", "crumble"].includes(demise.defeatMode)) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(angle + dissolve * 5); ctx.beginPath(); ctx.moveTo(0,-s*.11); ctx.lineTo(s*.09,s*.1); ctx.lineTo(-s*.08,s*.07); ctx.closePath(); ctx.fill(); ctx.restore();
+    } else if (["wreck", "shutdown"].includes(demise.defeatMode)) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.fillRect(-s*.1,-s*.045,s*.2,s*.09); ctx.restore();
+    } else if (demise.defeatMode === "dissolve") {
+      ctx.beginPath(); ctx.arc(x, y, s * (.045 + index % 3 * .018), 0, Math.PI * 2); ctx.fill();
+    } else if (ascend) {
+      ctx.strokeStyle = sequence.profile.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y + s*.16); ctx.lineTo(x, y - s*.18); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.ellipse(x, y, s*.08, s*.045, angle, 0, Math.PI*2); ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -8395,6 +8608,7 @@ if (QA_MODE) {
       realm: game.scene.endless ? getRealmName(game.player.level) : null,
       lives: game.lives,
       corpses: game.corpses.length,
+      xpDrops: game.xpDrops.length,
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
       pacing: {
@@ -8434,6 +8648,16 @@ if (QA_MODE) {
         action: Number((game.boss.bossActionAnim || 0).toFixed(2)),
         reaction: Number((game.boss.bossReaction || 0).toFixed(2)),
         overlayRendered: Boolean(game.bossPhaseOverlayRendered),
+      } : null,
+      victorySequence: game.victorySequence ? {
+        stage: game.victorySequence.stage,
+        time: Number(game.victorySequence.time.toFixed(2)),
+        duration: game.victorySequence.duration,
+        initialDrops: game.victorySequence.initialDrops,
+        absorbed: game.victorySequence.absorbed,
+        xpValue: game.victorySequence.xpValue,
+        overlayRendered: Boolean(game.victorySequence.overlayRendered),
+        demiseMode: game.bossDemise?.defeatMode || null,
       } : null,
       enemySkills: {
         theme: game.scene.id,
