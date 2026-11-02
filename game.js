@@ -675,9 +675,9 @@ const skinDefinitions = [
 const sceneSkinRequirements = { snow: "frost", hospital: "antibody", orbit: "void", mars: "ember", moon: "lunar" };
 const classGearPrefixes = { melee: "先锋", ranger: "猎隼", mage: "秘术" };
 const divineGearDefinitions = {
-  melee: { icon: "⚔", name: "天罚战神核心", attack: "裁决武装" },
-  ranger: { icon: "✧", name: "星穹猎神装", attack: "超限磁轨" },
-  mage: { icon: "✦", name: "万象神谕法典", attack: "万象增幅" },
+  melee: { icon: "⚔", name: "天罚战神核心", attack: "裁决武装", primary: "#ffd568", secondary: "#fff7cf", reveal: "裁决剑锋完成实体化" },
+  ranger: { icon: "✧", name: "星穹猎神装", attack: "超限磁轨", primary: "#67e8ff", secondary: "#fff3a1", reveal: "星轨火控系统已接入" },
+  mage: { icon: "✦", name: "万象神谕法典", attack: "万象增幅", primary: "#d99cff", secondary: "#7effdd", reveal: "三重神谕法阵已展开" },
 };
 
 const petDefinitions = [
@@ -1968,17 +1968,19 @@ function activateDivineGearTrial() {
   game.maxHealth += healthGain;
   game.health = Math.min(game.maxHealth, game.health + healthGain);
   game.pulseTimer = 0;
+  game.invulnerable = Math.max(game.invulnerable, 1.45);
   game.divineTrialActive = true;
   game.divineAwakening = 2.15;
   game.banner = { text: `${definition.name} · 神器降临`, sub: `伤害 +${Math.round(stats.damage * 100)}% · 生命 +${healthGain} · 暴击 +${Math.round(stats.crit * 100)}%`, time: 3.8 };
   addFloater(player.x, player.y - 58, `超神装备接入 · ${definition.attack}`, "#fff2a5", 14);
-  for (let ring = 0; ring < 4; ring += 1) game.shockwaves.push({ x: player.x, y: player.y, radius: 8 + ring * 10, maxRadius: 110 + ring * 46, life: .85 + ring * .16, color: ring % 2 ? "#ffffff" : "#ffd66b" });
-  makeDirectionalParticles(player.x, player.y, "#ffe38c", 76, 260, -Math.PI / 2, Math.PI * 2, "spark");
+  for (let ring = 0; ring < 5; ring += 1) game.shockwaves.push({ x: player.x, y: player.y, radius: 8 + ring * 10, maxRadius: 110 + ring * 46, life: .85 + ring * .16, color: ring % 2 ? definition.secondary : definition.primary });
+  makeDirectionalParticles(player.x, player.y, definition.primary, 76, 260, -Math.PI / 2, Math.PI * 2, player.combatClass.id === "mage" ? "glyph" : "spark");
   makeDirectionalParticles(player.x, player.y - 25, "#ffffff", 34, 185, -Math.PI / 2, 1.8, "glyph");
   game.shake = Math.max(game.shake, 16);
   game.flash = Math.max(game.flash, .82);
   tone(330, .18, "triangle", .05, 1.8);
   setTimeout(() => tone(660, .24, "sine", .045, 1.55), 100);
+  vibrateFeedback([32, 24, 78]);
 }
 
 function updateDivineOverdrive(dt) {
@@ -2392,6 +2394,8 @@ function shoot() {
   const count = game.player.bulletCount;
   const weapon = game.player.weapon;
   const combatClass = game.player.combatClass;
+  const divineActive = game.divineTrialActive || game.divineOverdrive > 0;
+  const divineDefinition = divineGearDefinitions[combatClass.id];
   const bladeWave = player.derivedStyle === "bladeWave" && combatClass.id === "melee";
   const assassin = player.derivedStyle === "assassin" && combatClass.id === "ranger";
   const ritualSwarm = player.derivedStyle === "ritualSwarm" && combatClass.id === "mage";
@@ -2407,15 +2411,17 @@ function shoot() {
       damage: game.player.damage * (assassin && targetDistance < 155 * 155 ? 1.28 : 1),
       pierceLeft: game.player.pierce + identityPierce,
       explosive: ritualSwarm || Math.random() < game.player.explosionChance,
-      color: bladeWave ? "#b9fff1" : assassin ? "#ff85d2" : combatClass.color,
-      accent: bladeWave ? "#ffffff" : weapon.color,
+      color: divineActive ? divineDefinition.primary : bladeWave ? "#b9fff1" : assassin ? "#ff85d2" : combatClass.color,
+      accent: divineActive ? divineDefinition.secondary : bladeWave ? "#ffffff" : weapon.color,
       visual: bladeWave ? "pulse" : weapon.visual,
       attackStyle: bladeWave ? "blade" : game.scene.endless ? (combatClass.id === "mage" ? "orb" : "blade") : combatClass.style,
       contactAttack: combatClass.id === "melee" && !bladeWave,
       attackId,
       fx: bladeWave ? "flyingSword" : assassin ? "shadowBlade" : ritualSwarm ? "ritualOrb" : combatClass.fx,
-      size: bladeWave ? 21 : combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3,
-      hitRadius: bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5,
+      size: (bladeWave ? 21 : combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3) * (divineActive ? 1.24 : 1),
+      hitRadius: (bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5) + (divineActive ? 4 : 0),
+      divineWeapon: divineActive,
+      divineClass: divineActive ? combatClass.id : null,
       trail: [],
       age: 0,
       hits: new Set(),
@@ -2436,8 +2442,18 @@ function shoot() {
     game.shockwaves.push({ x: muzzleX, y: muzzleY, radius: 2, maxRadius: 20, life: .18, color: combatClass.color });
     makeDirectionalParticles(muzzleX, muzzleY, combatClass.color, weapon.id === "starbreaker" ? 10 : 4, weapon.id === "starbreaker" ? 150 : 85, baseAngle + Math.PI, .62, "spark");
   }
+  if (divineActive) spawnDivineMuzzleFx(muzzleX, muzzleY, baseAngle, combatClass.id, divineDefinition);
   game.shake = Math.max(game.shake, combatClass.id === "melee" ? 2.4 : weapon.id === "starbreaker" ? 3.2 : 1.1);
   tone(weapon.id === "starbreaker" ? 92 : combatClass.id === "mage" ? 410 : 245, weapon.id === "starbreaker" ? .11 : 0.026, combatClass.id === "mage" ? "sine" : "square", weapon.id === "starbreaker" ? .035 : 0.012, weapon.id === "starbreaker" ? .52 : .72);
+}
+
+function spawnDivineMuzzleFx(x, y, angle, classId, definition) {
+  const count = game.performance.quality > .58 ? 9 : 5;
+  game.shockwaves.push({ x, y, radius: 2, maxRadius: classId === "mage" ? 34 : 25, life: .22, color: definition.primary });
+  makeDirectionalParticles(x, y, definition.secondary, count, classId === "ranger" ? 185 : 125, angle + Math.PI, classId === "mage" ? 1.25 : .52, classId === "mage" ? "glyph" : "spark");
+  if (classId === "melee") {
+    game.impactBursts.push({ x, y, color: definition.primary, accent: definition.secondary, fx: "divineSlash", angle, sceneId: game.scene.id, classId, divineWeapon: true, divineClass: classId, life: .2, maxLife: .2, critical: false });
+  }
 }
 
 function buildEnemySpatialIndex() {
@@ -3061,6 +3077,8 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     life: critical ? .38 : bullet.contactAttack ? .32 : .27,
     maxLife: critical ? .38 : bullet.contactAttack ? .32 : .27,
     critical,
+    divineWeapon: Boolean(bullet.divineWeapon),
+    divineClass: bullet.divineClass || null,
   });
   const particleShape = ["snowball", "icicle", "cryo"].includes(bullet.fx) ? "shard"
     : ["powerArc", "flameArc", "flyingSword", "spiritSword", "spiritPet", "rail", "tracer"].includes(bullet.fx) ? "spark"
@@ -3069,6 +3087,11 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
   makeDirectionalParticles(x, y, debrisColor, lightweight ? 2 : critical ? 10 : bullet.contactAttack ? 7 : 5, critical ? 185 : 125, angle, .95, particleShape);
   if (!lightweight && (critical || ["serum", "plasma", "tesla", "graviton", "cryo"].includes(bullet.fx))) {
     game.shockwaves.push({ x, y, radius: 2, maxRadius: critical ? 34 : 22, life: .25, color: critical ? "#fff47a" : bullet.color });
+  }
+  if (bullet.divineWeapon && (!lightweight || Math.random() < .34)) {
+    const definition = divineGearDefinitions[bullet.divineClass] || divineGearDefinitions.ranger;
+    makeDirectionalParticles(x, y, definition.primary, lightweight ? 2 : 7, 155, angle, bullet.divineClass === "mage" ? 1.8 : .72, bullet.divineClass === "mage" ? "glyph" : "spark");
+    if (!lightweight) game.shockwaves.push({ x, y, radius: 2, maxRadius: bullet.divineClass === "melee" ? 46 : 31, life: .24, color: definition.primary });
   }
 }
 
@@ -4225,12 +4248,15 @@ function drawDivineAwakeningOverlay() {
   if (!game.divineAwakening && !game.divineOverdrive) return;
   const awakening = game.divineAwakening > 0;
   const intensity = awakening ? Math.min(1, game.divineAwakening / .65) : .42 + Math.sin(ambienceTime * 8) * .08;
+  const definition = divineGearDefinitions[game.player.combatClass.id];
+  const elapsed = awakening ? 2.15 - game.divineAwakening : 2.15;
+  const reveal = awakening ? Math.min(1, elapsed / .32) * Math.min(1, game.divineAwakening / .42) : 0;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const halo = ctx.createRadialGradient(W / 2, H * .51, 18, W / 2, H * .51, awakening ? 260 : 190);
-  halo.addColorStop(0, `rgba(255,247,181,${.2 * intensity})`);
-  halo.addColorStop(.35, `rgba(255,201,65,${.11 * intensity})`);
-  halo.addColorStop(1, "rgba(255,190,45,0)");
+  halo.addColorStop(0, colorAlpha(definition.secondary, .22 * intensity));
+  halo.addColorStop(.35, colorAlpha(definition.primary, .13 * intensity));
+  halo.addColorStop(1, colorAlpha(definition.primary, 0));
   ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
   ctx.translate(W / 2, H * .51);
   ctx.rotate(ambienceTime * (awakening ? 1.4 : .45));
@@ -4238,12 +4264,22 @@ function drawDivineAwakeningOverlay() {
   for (let index = 0; index < rays; index += 1) {
     ctx.rotate(Math.PI * 2 / rays);
     const ray = ctx.createLinearGradient(38, 0, awakening ? 245 : 165, 0);
-    ray.addColorStop(0, `rgba(255,244,169,${.26 * intensity})`);
-    ray.addColorStop(1, "rgba(102,255,232,0)");
+    ray.addColorStop(0, colorAlpha(index % 2 ? definition.secondary : definition.primary, .28 * intensity));
+    ray.addColorStop(1, colorAlpha(definition.primary, 0));
     ctx.fillStyle = ray;
     ctx.beginPath(); ctx.moveTo(35, -2); ctx.lineTo(awakening ? 255 : 175, -8); ctx.lineTo(awakening ? 255 : 175, 8); ctx.lineTo(35, 2); ctx.closePath(); ctx.fill();
   }
   ctx.restore();
+  if (reveal > 0) {
+    ctx.save(); ctx.globalAlpha = reveal; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const plate = ctx.createLinearGradient(52, 0, W - 52, 0); plate.addColorStop(0, colorAlpha(definition.primary, 0)); plate.addColorStop(.22, "rgba(3,8,10,.82)"); plate.addColorStop(.78, "rgba(3,8,10,.82)"); plate.addColorStop(1, colorAlpha(definition.primary, 0));
+    ctx.fillStyle = plate; ctx.fillRect(36, H * .37, W - 72, 118);
+    ctx.strokeStyle = colorAlpha(definition.primary, .65); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(66, H * .39); ctx.lineTo(W - 66, H * .39); ctx.moveTo(66, H * .49); ctx.lineTo(W - 66, H * .49); ctx.stroke();
+    ctx.shadowColor = definition.primary; ctx.shadowBlur = 24; ctx.fillStyle = definition.secondary; ctx.font = "900 38px system-ui"; ctx.fillText(definition.icon, W / 2, H * .405);
+    ctx.shadowBlur = 10; ctx.fillStyle = "#fffdf1"; ctx.font = "900 16px system-ui"; ctx.fillText(definition.name, W / 2, H * .45);
+    ctx.shadowBlur = 0; ctx.fillStyle = definition.primary; ctx.font = "800 8px system-ui"; ctx.fillText(definition.reveal, W / 2, H * .478);
+    ctx.restore();
+  }
 }
 
 function drawMovementGuide() {
@@ -4767,15 +4803,17 @@ function drawDivineDelivery() {
   if (!delivery.dropped) return;
   const pulse = 1 + Math.sin(ambienceTime * 7) * .07;
   ctx.save(); ctx.translate(delivery.dropX, delivery.dropY); ctx.scale(pulse, pulse);
-  ctx.fillStyle = "rgba(255,215,92,.12)"; ctx.beginPath(); ctx.arc(0, 0, 39, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "rgba(255,226,126,.76)"; ctx.lineWidth = 2; ctx.setLineDash([6, 5]); ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-  ctx.shadowColor = "#ffd65b"; ctx.shadowBlur = 18;
-  const crate = ctx.createLinearGradient(-18, -15, 20, 16); crate.addColorStop(0, "#fff2ac"); crate.addColorStop(.38, "#c78926"); crate.addColorStop(1, "#4b2c13");
+  const beam = ctx.createLinearGradient(0, -150, 0, 18); beam.addColorStop(0, colorAlpha(definition.primary, 0)); beam.addColorStop(.72, colorAlpha(definition.primary, .12)); beam.addColorStop(1, colorAlpha(definition.secondary, .36)); ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(-8, -150); ctx.lineTo(8, -150); ctx.lineTo(28, 14); ctx.lineTo(-28, 14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = colorAlpha(definition.primary, .14); ctx.beginPath(); ctx.arc(0, 0, 39, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = colorAlpha(definition.secondary, .82); ctx.lineWidth = 2; ctx.setLineDash([6, 5]); ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.save(); ctx.rotate(ambienceTime * 1.5); ctx.strokeStyle = colorAlpha(definition.primary, .62); ctx.lineWidth = 1.4; for (let mark = 0; mark < 4; mark += 1) { ctx.rotate(Math.PI / 2); ctx.strokeRect(28, -4, 11, 8); } ctx.restore();
+  ctx.shadowColor = definition.primary; ctx.shadowBlur = 18;
+  const crate = ctx.createLinearGradient(-18, -15, 20, 16); crate.addColorStop(0, definition.secondary); crate.addColorStop(.38, definition.primary); crate.addColorStop(1, "#14212a");
   ctx.fillStyle = crate; rr(-22, -16, 44, 32, 7); ctx.fill();
-  ctx.strokeStyle = "#fff0a5"; ctx.lineWidth = 2; rr(-22, -16, 44, 32, 7); ctx.stroke();
+  ctx.strokeStyle = definition.secondary; ctx.lineWidth = 2; rr(-22, -16, 44, 32, 7); ctx.stroke();
   ctx.fillStyle = "#241609"; ctx.font = "900 17px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(definition.icon, 0, 1);
   ctx.shadowBlur = 0; ctx.fillStyle = "rgba(5,8,12,.82)"; rr(-54, 24, 108, 19, 8); ctx.fill();
-  ctx.fillStyle = "#ffe995"; ctx.font = "900 9px system-ui"; ctx.fillText("靠近拾取 · 限时神装", 0, 34);
+  ctx.fillStyle = definition.secondary; ctx.font = "900 9px system-ui"; ctx.fillText(`靠近拾取 · ${definition.attack}`, 0, 34);
   ctx.restore();
 }
 
@@ -5505,6 +5543,24 @@ function drawBullet(bullet) {
   } else {
     ctx.beginPath(); ctx.arc(0, 0, bullet.explosive ? 5.2 : 3.4, 0, Math.PI * 2); ctx.fill();
   }
+  if (bullet.divineWeapon) drawDivineProjectileCoating(bullet);
+  ctx.restore();
+}
+
+function drawDivineProjectileCoating(bullet) {
+  const definition = divineGearDefinitions[bullet.divineClass] || divineGearDefinitions.ranger;
+  const pulse = .72 + Math.sin((bullet.age || 0) * 24) * .18;
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.strokeStyle = definition.primary; ctx.fillStyle = definition.secondary; ctx.shadowColor = definition.primary; ctx.shadowBlur = 14;
+  if (bullet.divineClass === "ranger") {
+    ctx.lineWidth = 1.4; for (const offset of [-7, 7]) { ctx.beginPath(); ctx.moveTo(-30, offset); ctx.lineTo(13, offset * .22); ctx.stroke(); }
+    ctx.rotate(Math.PI / 4); ctx.strokeRect(-6, -6, 12, 12);
+  } else if (bullet.divineClass === "mage") {
+    ctx.rotate((bullet.age || 0) * 7); ctx.lineWidth = 1.5;
+    for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, 9 + ring * 5, 4 + ring * 2, ring * Math.PI / 3, 0, Math.PI * 2); ctx.stroke(); }
+    for (let node = 0; node < 3; node += 1) { const a = node / 3 * Math.PI * 2; ctx.beginPath(); ctx.arc(Math.cos(a) * 15, Math.sin(a) * 7, 1.8 * pulse, 0, Math.PI * 2); ctx.fill(); }
+  } else {
+    ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(-3, 0, 28, -1.08, 1.08); ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -5591,6 +5647,21 @@ function drawImpactBurst(burst) {
   }
   drawImpactMaterial(burst, progress, alpha);
   if (burst.critical) { ctx.strokeStyle = "#fff36a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 17 + progress * 28, 0, Math.PI * 2); ctx.stroke(); }
+  if (burst.divineWeapon) {
+    const definition = divineGearDefinitions[burst.divineClass] || divineGearDefinitions.ranger;
+    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.strokeStyle = definition.primary; ctx.fillStyle = definition.secondary; ctx.shadowColor = definition.primary; ctx.shadowBlur = 17;
+    if (burst.divineClass === "melee") {
+      ctx.lineWidth = 8 - progress * 5; ctx.beginPath(); ctx.arc(-8, 0, 22 + progress * 38, -1.16, 1.16); ctx.stroke();
+      ctx.strokeStyle = definition.secondary; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(-5, 0, 31 + progress * 48, -.94, .94); ctx.stroke();
+    } else if (burst.divineClass === "ranger") {
+      ctx.lineWidth = 2; for (let line = -4; line <= 4; line += 1) { ctx.save(); ctx.rotate(line * .15); ctx.beginPath(); ctx.moveTo(3, 0); ctx.lineTo(28 + progress * 48, 0); ctx.stroke(); ctx.restore(); }
+      ctx.rotate(Math.PI / 4 + progress * 1.6); ctx.strokeRect(-10 - progress * 13, -10 - progress * 13, 20 + progress * 26, 20 + progress * 26);
+    } else {
+      ctx.rotate(progress * 2.4); ctx.lineWidth = 2; for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.arc(0, 0, 13 + progress * (22 + ring * 11), 0, Math.PI * 2); ctx.stroke(); }
+      for (let ray = 0; ray < 6; ray += 1) { ctx.rotate(Math.PI / 3); ctx.fillRect(12, -1.5, 22 + progress * 24, 3); }
+    }
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -6374,17 +6445,26 @@ function drawBase() {
   ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(x, y, auraRadius, 0, Math.PI * 2); ctx.fill();
   if (game.divineTrialActive || game.divineOverdrive > 0) {
     const empowered = game.divineOverdrive > 0;
+    const divineDefinition = divineGearDefinitions[player.combatClass.id];
     ctx.save(); ctx.translate(x, y - 8); ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = empowered ? "rgba(255,245,154,.92)" : "rgba(255,218,91,.66)";
+    ctx.strokeStyle = empowered ? divineDefinition.secondary : colorAlpha(divineDefinition.primary, .7);
     ctx.lineWidth = empowered ? 4 : 2;
     for (let ring = 0; ring < (empowered ? 3 : 2); ring += 1) {
       ctx.save(); ctx.rotate(ambienceTime * (ring % 2 ? -1.8 : 1.35)); ctx.setLineDash([8 + ring * 3, 7]);
       ctx.beginPath(); ctx.ellipse(0, 10, 40 + ring * 13, 17 + ring * 5, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
-    ctx.fillStyle = empowered ? "rgba(255,245,170,.72)" : "rgba(255,222,102,.46)";
+    ctx.fillStyle = empowered ? divineDefinition.secondary : colorAlpha(divineDefinition.primary, .58);
     for (let spark = 0; spark < (empowered ? 10 : 5); spark += 1) {
       const angle = ambienceTime * 2.4 + spark / (empowered ? 10 : 5) * Math.PI * 2;
       ctx.beginPath(); ctx.arc(Math.cos(angle) * (43 + spark % 3 * 8), Math.sin(angle) * 21 - 6, empowered ? 2.5 : 1.7, 0, Math.PI * 2); ctx.fill();
+    }
+    if (player.combatClass.id === "melee") {
+      ctx.strokeStyle = colorAlpha(divineDefinition.secondary, empowered ? .9 : .62); ctx.lineWidth = empowered ? 5 : 3;
+      for (let blade = 0; blade < 2; blade += 1) { ctx.save(); ctx.rotate(player.aimAngle + (blade ? Math.PI : 0)); ctx.beginPath(); ctx.arc(0, 0, empowered ? 68 : 52, -.68, .68); ctx.stroke(); ctx.restore(); }
+    } else if (player.combatClass.id === "ranger") {
+      ctx.rotate(player.aimAngle); ctx.strokeStyle = colorAlpha(divineDefinition.primary, .76); ctx.lineWidth = 1.5; ctx.strokeRect(28, -11, empowered ? 38 : 28, 22); ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(empowered ? 92 : 72, 0); ctx.stroke();
+    } else {
+      ctx.rotate(ambienceTime * 1.2); ctx.strokeStyle = colorAlpha(divineDefinition.secondary, .72); ctx.lineWidth = 1.8; for (let node = 0; node < 3; node += 1) { ctx.rotate(Math.PI * 2 / 3); ctx.strokeRect(34, -7, 14, 14); }
     }
     ctx.restore();
   }
@@ -7244,6 +7324,7 @@ if (QA_MODE) {
       derivedStyle: game.player.derivedStyle,
       synergy: game.player.activeSynergy?.synergy || null,
       boss: game.boss ? game.boss.hp : null,
+      divine: { active: game.divineTrialActive, awakening: game.divineAwakening, bullets: game.bullets.filter((bullet) => bullet.divineWeapon).length },
     } : { mode },
     skipToBoss: () => { if (game) game.elapsed = game.waveSeconds * 5; },
     grantLevel: () => { if (game) gainXp(game.player.xpNeeded); },
