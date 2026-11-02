@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "62";
+const ASSET_REVISION = "63";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -124,6 +124,7 @@ const heroClassIds = ["melee", "ranger", "mage"];
 const sceneIds = ["city", "snow", "hospital", "orbit", "mars", "moon", "cultivation"];
 const sceneHeroSprites = Object.fromEntries(sceneIds.map((sceneId) => [sceneId, Object.fromEntries(heroClassIds.map((classId) => [classId, createAssetImage(`./assets/characters/${sceneId}/${classId}.png`)]))]));
 const assetResolvedUrls = new Map();
+const battlefieldPatternCache = new WeakMap();
 
 const BOOT_ASSET_SIZES = {
   "./assets/opening-splash-v1.jpg": 642358,
@@ -537,6 +538,9 @@ const EFFECT_LIMITS = LOW_POWER_DEVICE
   : MOBILE_DEVICE
     ? { particles: 148, floaters: 32, bursts: 34, shockwaves: 26, corpses: 34, xpDrops: 76, medkits: 15, bullets: 112 }
     : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
+function allowExpensiveGlow() {
+  return !LOW_POWER_DEVICE || !game?.showcase;
+}
 const ENEMY_GRID_SIZE = 128;
 const enemyGridKey = (x, y) => (x + 32768) * 65536 + y + 32768;
 
@@ -1706,9 +1710,10 @@ function configureShowcaseBuild(state) {
   state.performance.quality = 1;
   state.performance.qualityCeiling = 1;
   state.performance.qualityFloor = 1;
-  player.damage = 1280;
-  player.fireInterval = .14;
-  player.bulletCount = 6;
+  player.damage = LOW_POWER_DEVICE ? 3280 : 1280;
+  player.fireInterval = LOW_POWER_DEVICE ? .18 : .14;
+  player.bulletCount = LOW_POWER_DEVICE ? 3 : 6;
+  player.showcaseProjectileScale = LOW_POWER_DEVICE ? 1.62 : 1;
   player.pierce = 9;
   player.explosionChance = .78;
   player.explosionRadius = 92;
@@ -2378,13 +2383,14 @@ function drawCompanionPet() {
     const attackPulse = game.player.companionPetTimer > pet.interval - .16 ? Math.sin((pet.interval - game.player.companionPetTimer) / .16 * Math.PI) : 0;
     ctx.scale(facing, 1);
     ctx.rotate(Math.sin(ambienceTime * 3.1) * .025 - attackPulse * .07);
-    ctx.shadowColor = pet.color; ctx.shadowBlur = 14 + attackPulse * 12;
+    if (allowExpensiveGlow()) { ctx.shadowColor = pet.color; ctx.shadowBlur = 14 + attackPulse * 12; }
     const width = pet.id === "warHound" ? 78 : 72;
     const height = pet.id === "herbSprite" ? 63 : 66;
     spriteRendered = drawImageSafe(companionAtlas, sourceWidth * pet.spriteIndex, 0, sourceWidth, companionAtlas.naturalHeight, -width / 2, -height * .69, width, height);
   }
   if (!spriteRendered) {
-    ctx.shadowColor = pet.color; ctx.shadowBlur = 12; ctx.fillStyle = colorAlpha(pet.color, .92);
+    if (allowExpensiveGlow()) { ctx.shadowColor = pet.color; ctx.shadowBlur = 12; }
+    ctx.fillStyle = colorAlpha(pet.color, .92);
     ctx.beginPath(); ctx.ellipse(0, 0, 15, 10, -.1, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(12, -7, 8, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = pet.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(-11, 1, 18, 1.7, 4.8); ctx.stroke();
@@ -2628,8 +2634,8 @@ function shoot() {
       contactAttack: combatClass.id === "melee" && !bladeWave,
       attackId,
       fx: bladeWave ? "flyingSword" : assassin ? "shadowBlade" : ritualSwarm ? "ritualOrb" : combatClass.fx,
-      size: (bladeWave ? 21 : combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3) * (divineActive ? 1.24 : 1),
-      hitRadius: (bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5) + (divineActive ? 4 : 0),
+      size: (bladeWave ? 21 : combatClass.fx === "flyingSword" ? 18 : weapon.id === "starbreaker" ? 8 : weapon.visual === "magic" ? 5 : 3) * (divineActive ? 1.24 : 1) * (player.showcaseProjectileScale || 1),
+      hitRadius: (bladeWave ? 28 : combatClass.fx === "flyingSword" ? 24 : ritualSwarm ? 10 : 5) + (divineActive ? 4 : 0) + ((player.showcaseProjectileScale || 1) - 1) * 4,
       divineWeapon: divineActive,
       divineClass: divineActive ? combatClass.id : null,
       trail: [],
@@ -3203,7 +3209,9 @@ function damageEnemy(enemy, amount, critical = false, secondary = false) {
   }
   enemy.hp -= amount;
   enemy.flash = 0.075;
-  if (preferences.damageNumbers && (!secondary || Math.random() < 0.3)) {
+  const damageNumberReady = !game.showcase || !MOBILE_DEVICE || (enemy.nextDamageNumberAt || 0) <= game.elapsed;
+  if (preferences.damageNumbers && damageNumberReady && (!secondary || Math.random() < 0.3)) {
+    if (game.showcase && MOBILE_DEVICE) enemy.nextDamageNumberAt = game.elapsed + (LOW_POWER_DEVICE ? .16 : .1);
     addFloater(enemy.x + rand(-4, 4), enemy.y - enemy.size, Math.round(amount), critical ? "#fff46a" : "#eef6dc", critical ? 15 : 10);
   }
   if (critical) {
@@ -4857,7 +4865,7 @@ function drawBattlefield() {
     ctx.ellipse(0, 0, wave.radius, wave.radius * (wave.ellipse || 1), 0, 0, Math.PI * 2);
     ctx.strokeStyle = colorAlpha(wave.color, Math.min(0.8, wave.life * 1.6));
     ctx.lineWidth = wave.lineWidth || (wave.color === "#66f5d2" ? 5 : 3);
-    if (wave.lineWidth >= 6 && game.performance.quality > .58) { ctx.shadowColor = wave.color; ctx.shadowBlur = 12; }
+    if (wave.lineWidth >= 6 && game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = wave.color; ctx.shadowBlur = 12; }
     ctx.stroke();
     ctx.restore();
   }
@@ -4958,7 +4966,8 @@ function drawCombatParticle(particle) {
   const alpha = Math.min(1, particle.life / .18);
   ctx.save(); ctx.translate(particle.x, particle.y); ctx.rotate(particle.rotation || 0); ctx.globalAlpha = alpha;
   ctx.fillStyle = particle.color; ctx.strokeStyle = particle.color;
-  if (game.performance.quality > .58) { ctx.shadowColor = particle.color; ctx.shadowBlur = particle.shape ? 6 : 2; }
+  if (game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = particle.color; ctx.shadowBlur = particle.shape ? 6 : 2; }
+  else if (game.showcase) ctx.globalCompositeOperation = "lighter";
   if (particle.shape === "spark") {
     ctx.lineWidth = Math.max(1, particle.size * .55); ctx.beginPath(); ctx.moveTo(-particle.size * 2.6, 0); ctx.lineTo(particle.size * 2.6, 0); ctx.stroke();
   } else if (particle.shape === "shard") {
@@ -5366,6 +5375,24 @@ function drawWorldDecor() {
 
 function drawWorldTexture(texture, left, right, top, bottom, sceneId) {
   const arenaSize = sceneId === "cultivation" ? 1080 : 980;
+  if (LOW_POWER_DEVICE && game.showcase) {
+    let pattern = battlefieldPatternCache.get(texture);
+    if (!pattern) {
+      pattern = ctx.createPattern(texture, "repeat");
+      if (pattern?.setTransform && typeof DOMMatrix !== "undefined") {
+        pattern.setTransform(new DOMMatrix().scale(arenaSize / texture.naturalWidth, arenaSize / texture.naturalHeight));
+      }
+      if (pattern) battlefieldPatternCache.set(texture, pattern);
+    }
+    if (pattern) {
+      ctx.save();
+      ctx.globalAlpha = sceneId === "snow" || sceneId === "moon" ? .9 : .94;
+      ctx.fillStyle = pattern;
+      ctx.fillRect(left, top, right - left, bottom - top);
+      ctx.restore();
+      return;
+    }
+  }
   const startX = Math.floor((left + arenaSize / 2) / arenaSize);
   const endX = Math.floor((right + arenaSize / 2) / arenaSize);
   const startY = Math.floor((top + arenaSize / 2) / arenaSize);
@@ -5872,10 +5899,10 @@ function drawBullet(bullet) {
   const angle = Math.atan2(bullet.vy, bullet.vx);
   const pulse = 1 + Math.sin((bullet.age || 0) * 18) * .12;
   ctx.save(); ctx.translate(bullet.x, bullet.y); ctx.rotate(angle);
-  if (game.performance.quality > .58) {
+  if (game.performance.quality > .58 && allowExpensiveGlow()) {
     ctx.shadowColor = bullet.explosive ? "#ff9e45" : bullet.color;
     ctx.shadowBlur = bullet.visual === "starbreaker" ? 22 : 13;
-  }
+  } else if (game.showcase) ctx.globalCompositeOperation = "lighter";
   ctx.fillStyle = bullet.explosive ? "#ffb54f" : bullet.color;
 
   if (bullet.fx === "shadowBlade") {
@@ -6012,7 +6039,8 @@ function drawImpactBurst(burst) {
   const alpha = Math.max(0, 1 - progress);
   ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
   ctx.globalAlpha = alpha; ctx.lineCap = "round";
-  if (game.performance.quality > .58) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
+  if (game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
+  else if (game.showcase) ctx.globalCompositeOperation = "lighter";
   ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(1, 0, 7 * (1 - progress) + 2, 12 * (1 - progress) + 2, 0, 0, Math.PI * 2); ctx.fill();
   const slashFx = ["powerArc", "flameArc", "qiArc", "flyingSword", "spiritSword", "spiritPet"].includes(burst.fx);
   const shieldFx = ["disinfectant", "ionArc"].includes(burst.fx);
@@ -6801,7 +6829,9 @@ function drawSupportDroneSystems(player) {
     const angle = ambienceTime * 1.35 + index / count * Math.PI * 2;
     const x = Math.cos(angle) * 52, y = Math.sin(angle) * 25;
     ctx.save(); ctx.translate(x, y); ctx.rotate(angle + Math.PI / 2);
-    ctx.shadowColor = "#73e9ff"; ctx.shadowBlur = 11; ctx.fillStyle = "#dffbff";
+    if (allowExpensiveGlow()) { ctx.shadowColor = "#73e9ff"; ctx.shadowBlur = 11; }
+    else ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "#dffbff";
     ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(1, -6); ctx.lineTo(-9, -4); ctx.lineTo(-5, 0); ctx.lineTo(-9, 4); ctx.lineTo(1, 6); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#62d9ff"; ctx.fillRect(-2, -7, 4, 14); ctx.restore();
   }
