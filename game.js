@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "76";
+const ASSET_REVISION = "77";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -825,30 +825,37 @@ const sceneCombatModels = {
 const evolutionSignatureProfiles = {
   city: {
     melee: { id: "powerSaw", name: "动力锯齿斩", color: "#ffad55" },
+    ranger: { id: "railLance", name: "穿城磁轨矛", color: "#70eaff" },
     mage: { id: "teslaCrown", name: "特斯拉雷冠", color: "#cda6ff" },
   },
   snow: {
     melee: { id: "glacierFracture", name: "冰川碎岳", color: "#dffbff" },
+    ranger: { id: "auroraSpear", name: "极光冰矛链", color: "#8cecff" },
     mage: { id: "zeroMandala", name: "绝对零度雪轮", color: "#a9eaff" },
   },
   hospital: {
     melee: { id: "sterileBreach", name: "无菌隔离冲击", color: "#83ffda" },
+    ranger: { id: "antibodyHelix", name: "抗体螺旋针", color: "#73ffd4" },
     mage: { id: "lysisCross", name: "裂解十字域", color: "#72ffd0" },
   },
   orbit: {
     melee: { id: "orbitalTide", name: "群星潮汐环", color: "#82dcff" },
+    ranger: { id: "starRail", name: "星舰贯阵束", color: "#77eeff" },
     mage: { id: "swarmGate", name: "蜂群跃迁门", color: "#bda0ff" },
   },
   mars: {
     melee: { id: "magmaRift", name: "熔核断层斩", color: "#ff9d69" },
+    ranger: { id: "tungstenComet", name: "赤砂钨芯彗星", color: "#ffd276" },
     mage: { id: "coronaBloom", name: "日冕等离子花", color: "#ff8fc7" },
   },
   moon: {
     melee: { id: "gravityTide", name: "月震引力潮", color: "#e9e8ff" },
+    ranger: { id: "vacuumPulse", name: "静海真空脉冲", color: "#aeeaff" },
     mage: { id: "lensCollapse", name: "静海透镜坍缩", color: "#c4b7ff" },
   },
   cultivation: {
     melee: { id: "swordDomain", name: "镇岳剑域", color: "#ffd27a" },
+    ranger: { id: "flyingRainbow", name: "飞虹破罡剑气", color: "#a9ffe0" },
     mage: { id: "starSeal", name: "星罗两仪法印", color: "#d5b4ff" },
   },
 };
@@ -1934,6 +1941,9 @@ function makeGame(runType = "main") {
     projectileEvolutionRendered: 0,
     evolutionImpactRendered: 0,
     evolutionSignatureRenders: { attack: null, impact: null, projectile: null },
+    rangerFinisher: null,
+    lastRangerFinisher: null,
+    rangerFinisherCooldown: 0,
     lastEvolutionScarAt: -99,
     combo: 0,
     comboTimer: 0,
@@ -3074,6 +3084,7 @@ function shoot() {
       evolutionPrimary: i === Math.floor(count / 2),
       evolutionSignature: evolutionSignature?.id || null,
       evolutionSignatureName: evolutionSignature?.name || null,
+      classId: combatClass.id,
       trail: [],
       age: 0,
       hits: new Set(),
@@ -3219,6 +3230,9 @@ function updateBullets(dt) {
       const impactY = enemy.y - Math.sin(impactAngle) * surfaceDistance;
       applyEnemyHitReaction(enemy, bullet, impactAngle, critical);
       damageEnemy(enemy, dealt, critical);
+      if (enemy.dead && critical && bullet.classId === "ranger" && bullet.evolutionTier >= 3) {
+        triggerRangerFinisher(enemy, bullet, impactX, impactY);
+      }
       const piercingThrough = bullet.pierceLeft > 0;
       spawnImpactBurst(impactX, impactY, bullet, critical, enemy, piercingThrough && !critical);
       if (!enemy.dead) {
@@ -3800,6 +3814,28 @@ function damageEnemy(enemy, amount, critical = false, secondary = false) {
   if (enemy.hp <= 0) killEnemy(enemy);
 }
 
+function triggerRangerFinisher(enemy, bullet, x, y) {
+  if (game.rangerFinisherCooldown > 0 || !bullet.evolutionSignature) return;
+  const duration = LOW_POWER_DEVICE ? .42 : .62;
+  const finisher = {
+    x,
+    y,
+    enemySize: enemy.size,
+    signature: bullet.evolutionSignature,
+    name: bullet.evolutionSignatureName,
+    color: bullet.evolutionColor || bullet.color,
+    time: duration,
+    maxTime: duration,
+    rendered: false,
+  };
+  game.rangerFinisher = finisher;
+  game.lastRangerFinisher = finisher;
+  game.rangerFinisherCooldown = LOW_POWER_DEVICE ? .72 : .42;
+  game.shockwaves.push({ x, y, radius: 8, maxRadius: 78 + enemy.size, life: .32, maxLife: .32, color: finisher.color });
+  makeParticles(x, y, finisher.color, LOW_POWER_DEVICE ? 4 : 9, 125);
+  addFloater(x, y - enemy.size - 12, `处决 · ${finisher.name}`, "#ffffff", 11);
+}
+
 function beginBossVictorySequence(enemy) {
   if (game.victorySequence) return;
   const profile = getBossDefeatProfile();
@@ -4348,6 +4384,11 @@ function applyEndlessOverflow(id, player) {
 }
 
 function updateEffects(dt) {
+  game.rangerFinisherCooldown = Math.max(0, game.rangerFinisherCooldown - dt);
+  if (game.rangerFinisher) {
+    game.rangerFinisher.time -= dt;
+    if (game.rangerFinisher.time <= 0) game.rangerFinisher = null;
+  }
   if (game.ultimate) {
     game.ultimate.time -= dt;
     const ultimate = game.ultimate;
@@ -5803,6 +5844,7 @@ function drawBattlefield() {
   for (const projectile of game.enemyProjectiles) if (isWorldPointVisible(projectile.x, projectile.y, 36)) drawEnemyProjectile(projectile);
   for (const bullet of game.bullets) if (isWorldPointVisible(bullet.x, bullet.y, 48)) drawBullet(bullet);
   for (const burst of game.impactBursts) if (isWorldPointVisible(burst.x, burst.y, 54)) drawImpactBurst(burst);
+  if (game.rangerFinisher && isWorldPointVisible(game.rangerFinisher.x, game.rangerFinisher.y, 120)) drawRangerFinisher(game.rangerFinisher);
   for (const lightning of game.lightnings) if (isWorldPointVisible(lightning.x, lightning.y, 80)) drawLightning(lightning);
   drawUltimateEffect();
   const particleStep = game.performance?.quality < .65 ? 2 : 1;
@@ -7537,7 +7579,23 @@ function drawEvolutionProjectileGlyph(bullet, radius) {
   ctx.save();
   ctx.strokeStyle = colorAlpha("#ffffff", .78); ctx.fillStyle = colorAlpha(color, .85); ctx.lineWidth = 1.4;
   const spin = (bullet.age || 0) * 3.4;
-  if (signature === "teslaCrown") {
+  if (signature === "railLance" || signature === "starRail") {
+    for (const y of [-radius * .36, radius * .36]) { ctx.beginPath(); ctx.moveTo(-radius * 1.3, y); ctx.lineTo(radius * 1.3, y * .25); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(radius * 1.35, 0); ctx.lineTo(radius * .42, -radius * .55); ctx.lineTo(-radius * .2, 0); ctx.lineTo(radius * .42, radius * .55); ctx.closePath(); ctx.stroke();
+  } else if (signature === "auroraSpear") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.45, 0); ctx.lineTo(-radius * .6, -radius * .52); ctx.lineTo(-radius * .18, 0); ctx.lineTo(-radius * .6, radius * .52); ctx.closePath(); ctx.fill();
+    for (const y of [-radius * .3, radius * .3]) { ctx.beginPath(); ctx.moveTo(-radius * .35, y); ctx.lineTo(-radius, y * 1.35); ctx.stroke(); }
+  } else if (signature === "antibodyHelix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let i = -5; i <= 5; i += 1) { const x = i / 5 * radius; const y = Math.sin(i * .95 + phase + spin) * radius * .34; if (i === -5) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (signature === "tungstenComet") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.5, 0); ctx.lineTo(-radius * .7, -radius * .5); ctx.lineTo(-radius * .2, 0); ctx.lineTo(-radius * .7, radius * .5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#fff3c2"; ctx.beginPath(); ctx.moveTo(-radius * .3, 0); ctx.lineTo(-radius * 1.45, 0); ctx.stroke();
+  } else if (signature === "vacuumPulse") {
+    for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.ellipse(ring * radius * .3, 0, radius * (.55 + ring * .22), radius * (.24 + ring * .08), 0, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (signature === "flyingRainbow") {
+    ctx.lineWidth = 3.2; ctx.beginPath(); ctx.arc(-radius * .25, 0, radius * 1.2, -.86, .86); ctx.stroke();
+    ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-radius, 0); ctx.lineTo(radius * 1.25, 0); ctx.stroke();
+  } else if (signature === "teslaCrown") {
     ctx.beginPath(); ctx.moveTo(-radius, radius * .55); ctx.lineTo(-radius * .3, -radius * .65); ctx.lineTo(radius * .2, radius * .28); ctx.lineTo(radius, -radius * .5); ctx.stroke();
   } else if (signature === "zeroMandala") {
     ctx.rotate(spin);
@@ -7720,12 +7778,56 @@ function drawEvolutionImpactSignature(burst, progress, alpha) {
   ctx.restore();
 }
 
+function drawRangerFinisher(finisher) {
+  const progress = 1 - finisher.time / finisher.maxTime;
+  const reveal = Math.sin(Math.min(1, progress * 1.35) * Math.PI);
+  const radius = 24 + progress * (42 + Math.min(30, finisher.enemySize));
+  finisher.rendered = true;
+  ctx.save(); ctx.translate(finisher.x, finisher.y);
+  ctx.globalCompositeOperation = game.performance.quality > .52 ? "lighter" : "source-over";
+  ctx.globalAlpha = .25 + reveal * .75;
+  ctx.strokeStyle = finisher.color; ctx.fillStyle = colorAlpha(finisher.color, .68); ctx.shadowColor = finisher.color;
+  ctx.shadowBlur = LOW_POWER_DEVICE ? 0 : 18; ctx.lineWidth = 2.5;
+  if (["railLance", "starRail"].includes(finisher.signature)) {
+    for (const y of [-10, 0, 10]) { ctx.beginPath(); ctx.moveTo(-radius, y); ctx.lineTo(radius * 1.4, y * .3); ctx.stroke(); }
+    ctx.rotate(Math.PI / 4); ctx.strokeRect(-radius * .35, -radius * .35, radius * .7, radius * .7);
+  } else if (finisher.signature === "auroraSpear") {
+    for (let shard = 0; shard < 8; shard += 1) { ctx.save(); ctx.rotate(shard / 8 * Math.PI * 2); ctx.translate(radius, 0); ctx.beginPath(); ctx.moveTo(13, 0); ctx.lineTo(-7, -4); ctx.lineTo(-3, 6); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (finisher.signature === "antibodyHelix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let i = -6; i <= 6; i += 1) { const x = i / 6 * radius; const y = Math.sin(i * .88 + phase + progress * 4) * radius * .25; if (i === -6) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (finisher.signature === "tungstenComet") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.3, 0); ctx.lineTo(-radius * .6, -radius * .45); ctx.lineTo(-radius * .15, 0); ctx.lineTo(-radius * .6, radius * .45); ctx.closePath(); ctx.stroke();
+    for (const y of [-12, 0, 12]) { ctx.beginPath(); ctx.moveTo(-radius * .25, y); ctx.lineTo(-radius * 1.15, y * 1.4); ctx.stroke(); }
+  } else if (finisher.signature === "vacuumPulse") {
+    for (let ring = 0; ring < 4; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 11, radius * (.22 + ring * .05), ring * .58 + progress, 0, Math.PI * 2); ctx.stroke(); }
+  } else {
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(-radius * .1, 0, radius, -.95, .95); ctx.stroke();
+    ctx.lineWidth = 1.5; for (const y of [-12, 0, 12]) { ctx.beginPath(); ctx.moveTo(radius * .1, y); ctx.lineTo(radius * 1.3, y * 1.6); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
 function drawThemedEvolutionImpactGlyph(burst, progress, color) {
   const id = burst.evolutionSignature;
   const radius = 15 + progress * 24;
   game.evolutionSignatureRenders.impact = id;
   ctx.save(); ctx.strokeStyle = colorAlpha("#ffffff", .76); ctx.fillStyle = colorAlpha(color, .62); ctx.lineWidth = 1.5;
-  if (id === "powerSaw") {
+  if (id === "railLance" || id === "starRail") {
+    for (const offset of [-.38, 0, .38]) { ctx.beginPath(); ctx.moveTo(-radius * .45, offset * radius); ctx.lineTo(radius * 1.45, offset * radius * .25); ctx.stroke(); }
+    ctx.rotate(Math.PI / 4 + progress); ctx.strokeRect(-radius * .42, -radius * .42, radius * .84, radius * .84);
+  } else if (id === "auroraSpear") {
+    for (let shard = 0; shard < 8; shard += 1) { ctx.save(); ctx.rotate(shard / 8 * Math.PI * 2); ctx.translate(radius, 0); ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -3); ctx.lineTo(-3, 5); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (id === "antibodyHelix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let i = -6; i <= 6; i += 1) { const x = i / 6 * radius; const y = Math.sin(i * .82 + phase + progress * 4) * radius * .3; if (i === -6) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (id === "tungstenComet") {
+    for (let ray = 0; ray < 7; ray += 1) { ctx.save(); ctx.rotate(ray / 7 * Math.PI * 2); ctx.beginPath(); ctx.moveTo(radius * .3, 0); ctx.lineTo(radius * 1.45, ray % 2 ? 3 : -3); ctx.stroke(); ctx.restore(); }
+    ctx.beginPath(); ctx.moveTo(radius, 0); ctx.lineTo(-radius * .5, -radius * .42); ctx.lineTo(-radius * .18, 0); ctx.lineTo(-radius * .5, radius * .42); ctx.closePath(); ctx.fill();
+  } else if (id === "vacuumPulse") {
+    for (let ring = 0; ring < 4; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 7, radius * (.2 + ring * .05), progress + ring * .55, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (id === "flyingRainbow") {
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(-radius * .2, 0, radius * 1.15, -.95, .95); ctx.stroke(); ctx.lineWidth = 1.4;
+    for (const y of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(radius * .1, y); ctx.lineTo(radius * 1.38, y * 1.7); ctx.stroke(); }
+  } else if (id === "powerSaw") {
     ctx.setLineDash([5, 3]); for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.arc(0, 0, radius + ring * 6, -.92, .92); ctx.stroke(); } ctx.setLineDash([]);
   } else if (id === "glacierFracture") {
     for (let shard = 0; shard < 7; shard += 1) { ctx.save(); ctx.rotate(shard / 7 * Math.PI * 2); ctx.translate(radius, 0); ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -3); ctx.lineTo(-3, 5); ctx.closePath(); ctx.fill(); ctx.restore(); }
@@ -8163,7 +8265,24 @@ function drawEvolvedClassAttackSignature(player, eased) {
   ctx.strokeStyle = profile.color; ctx.fillStyle = colorAlpha(profile.color, .78); ctx.lineWidth = 1.4 + tier * .65;
   const spin = ambienceTime * (profile.id === "swarmGate" ? 4.2 : 1.8);
 
-  if (profile.id === "powerSaw") {
+  if (profile.id === "railLance" || profile.id === "starRail") {
+    const rails = LOW_POWER_DEVICE ? 2 : 3;
+    for (let rail = 0; rail < rails; rail += 1) { const y = (rail - (rails - 1) / 2) * 10; ctx.beginPath(); ctx.moveTo(-radius * .55, y); ctx.lineTo(radius * 2.15, y * .22); ctx.stroke(); }
+    ctx.save(); ctx.translate(radius * .75, 0); ctx.rotate(Math.PI / 4); ctx.strokeRect(-radius * .24, -radius * .24, radius * .48, radius * .48); ctx.restore();
+  } else if (profile.id === "auroraSpear") {
+    const spears = LOW_POWER_DEVICE ? 3 : 3 + tier;
+    for (let spear = 0; spear < spears; spear += 1) { const y = (spear - (spears - 1) / 2) * 8; ctx.save(); ctx.translate(radius * .45, y); ctx.beginPath(); ctx.moveTo(radius * 1.5, 0); ctx.lineTo(-radius * .32, -5); ctx.lineTo(-radius * .1, 0); ctx.lineTo(-radius * .32, 5); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (profile.id === "antibodyHelix") {
+    for (const phase of [0, Math.PI]) { ctx.beginPath(); for (let step = -7; step <= 7; step += 1) { const x = step / 7 * radius * 1.65; const y = Math.sin(step * .72 + phase + spin * 2) * radius * .28; if (step === -7) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); }
+  } else if (profile.id === "tungstenComet") {
+    ctx.beginPath(); ctx.moveTo(radius * 2.05, 0); ctx.lineTo(-radius * .2, -radius * .42); ctx.lineTo(radius * .15, 0); ctx.lineTo(-radius * .2, radius * .42); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#fff4c8"; for (const y of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(-radius, y * 1.4); ctx.stroke(); }
+  } else if (profile.id === "vacuumPulse") {
+    for (let ring = 0; ring < Math.min(4, tier + 1); ring += 1) { ctx.beginPath(); ctx.ellipse(radius * (.15 + ring * .35), 0, radius * (.55 + ring * .18), radius * (.2 + ring * .05), 0, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (profile.id === "flyingRainbow") {
+    ctx.lineWidth = 3 + tier; ctx.beginPath(); ctx.arc(0, 0, radius * 1.35, -.92, .92); ctx.stroke(); ctx.strokeStyle = "#f3fff8"; ctx.lineWidth = 1.3;
+    for (const y of [-9, 0, 9]) { ctx.beginPath(); ctx.moveTo(radius * .1, y); ctx.lineTo(radius * 1.8, y * 1.7); ctx.stroke(); }
+  } else if (profile.id === "powerSaw") {
     for (let ring = 0; ring < Math.min(3, tier); ring += 1) { ctx.setLineDash([7 + ring * 2, 4]); ctx.beginPath(); ctx.arc(0, 0, radius + ring * 8, -.95, .86); ctx.stroke(); } ctx.setLineDash([]);
   } else if (profile.id === "glacierFracture") {
     const shards = LOW_POWER_DEVICE ? 4 : 5 + tier;
@@ -9754,6 +9873,12 @@ if (QA_MODE) {
         terrainScar: game.bossScars.some((scar) => scar.source === "weapon"),
         evolutionTerrainScar: game.lastEvolutionScarAt > -90,
       },
+      rangerFinisher: game.lastRangerFinisher ? {
+        signature: game.lastRangerFinisher.signature,
+        name: game.lastRangerFinisher.name,
+        rendered: Boolean(game.lastRangerFinisher.rendered),
+        active: game.rangerFinisher === game.lastRangerFinisher,
+      } : null,
       playerVisual: {
         mode: game.playerVisualMode || "pending",
         renderFailures: renderFailureCount,
