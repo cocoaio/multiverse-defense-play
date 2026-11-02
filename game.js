@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "70";
+const ASSET_REVISION = "71";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -649,6 +649,16 @@ const corpseDeathProfiles = {
   cultivation: { mode: "spirit", color: "#ddffe4" },
 };
 
+const impactMaterialProfiles = {
+  city: { material: "flesh", color: "#ff6c42", debris: "chip" },
+  snow: { material: "ice", color: "#d9fbff", debris: "shard" },
+  hospital: { material: "membrane", color: "#72ffd0", debris: "spore" },
+  orbit: { material: "alloy", color: "#6deaff", debris: "chip" },
+  mars: { material: "stone", color: "#ff9b58", debris: "shard" },
+  moon: { material: "ceramic", color: "#d8d4ff", debris: "chip" },
+  cultivation: { material: "spirit", color: "#ddffe4", debris: "glyph" },
+};
+
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
 }
@@ -667,6 +677,10 @@ function getBossDefeatProfile(sceneId = game?.scene?.id || "city") {
 
 function getCorpseDeathProfile(sceneId = game?.scene?.id || "city") {
   return corpseDeathProfiles[sceneId] || corpseDeathProfiles.city;
+}
+
+function getImpactMaterialProfile(sceneId = game?.scene?.id || "city") {
+  return impactMaterialProfiles[sceneId] || impactMaterialProfiles.city;
 }
 
 const cultivationDomains = [
@@ -2686,6 +2700,13 @@ function spawnEnemy(type, x, y, forcedAngle) {
     dashTimer: 0,
     slowTimer: 0,
     flash: 0,
+    hitAngle: 0,
+    hitKick: 0,
+    hitReaction: null,
+    hitReactionTimer: 0,
+    hitReactionMax: 0,
+    hitReactionStrength: 0,
+    hitReactionRendered: false,
     dead: false,
     ...stats,
   };
@@ -2913,6 +2934,28 @@ function findClosestLivingEnemy(x, y) {
   return closest;
 }
 
+function getEnemyHitReactionType(bullet) {
+  const fx = bullet?.fx || "tracer";
+  if (bullet?.contactAttack || ["powerArc", "flameArc", "qiArc", "flyingSword", "spiritSword", "shadowBlade"].includes(fx)) return "slash";
+  if (["snowball", "gravityArc", "graviton", "drone"].includes(fx)) return "crush";
+  if (["icicle", "cryo", "plasma", "tesla", "ionArc", "spell", "ritualOrb", "serum", "disinfectant"].includes(fx)) return "elemental";
+  return "ballistic";
+}
+
+function applyEnemyHitReaction(enemy, bullet, angle, critical = false) {
+  const reaction = getEnemyHitReactionType(bullet);
+  const duration = reaction === "crush" ? .34 : reaction === "slash" ? .3 : reaction === "elemental" ? .28 : .22;
+  const bossScale = enemy.type === "boss" ? .58 : enemy.type === "tank" ? .78 : 1;
+  enemy.hitAngle = angle;
+  enemy.hitReaction = reaction;
+  enemy.hitReactionTimer = duration;
+  enemy.hitReactionMax = duration;
+  enemy.hitReactionStrength = (critical ? 1.34 : 1) * bossScale;
+  enemy.hitMaterial = getImpactMaterialProfile().material;
+  enemy.hitReactionRendered = false;
+  enemy.hitKick = Math.max(enemy.hitKick || 0, (bullet?.contactAttack ? 10 : critical ? 7 : reaction === "crush" ? 6 : 4) * bossScale);
+}
+
 function updateBullets(dt) {
   buildEnemySpatialIndex();
   for (const bullet of game.bullets) {
@@ -2954,11 +2997,10 @@ function updateBullets(dt) {
       const surfaceDistance = enemy.size * (game.scene.endless ? 1.05 : .76);
       const impactX = enemy.x - Math.cos(impactAngle) * surfaceDistance;
       const impactY = enemy.y - Math.sin(impactAngle) * surfaceDistance;
+      applyEnemyHitReaction(enemy, bullet, impactAngle, critical);
       damageEnemy(enemy, dealt, critical);
       const piercingThrough = bullet.pierceLeft > 0;
       spawnImpactBurst(impactX, impactY, bullet, critical, enemy, piercingThrough && !critical);
-      enemy.hitAngle = impactAngle;
-      enemy.hitKick = bullet.contactAttack ? 9 : critical ? 6 : 3.5;
       if (!enemy.dead) {
         const knockback = bullet.contactAttack ? (enemy.type === "boss" ? 3 : 9) : critical ? 3 : 0;
         enemy.x += Math.cos(impactAngle) * knockback;
@@ -3236,6 +3278,8 @@ function updateEnemies(dt) {
     if (enemy.dead) continue;
     enemy.flash = Math.max(0, enemy.flash - dt);
     enemy.hitKick = Math.max(0, (enemy.hitKick || 0) - dt * 62);
+    enemy.hitReactionTimer = Math.max(0, (enemy.hitReactionTimer || 0) - dt);
+    if (enemy.hitReactionTimer <= 0) enemy.hitReaction = null;
     enemy.rangedFlash = Math.max(0, (enemy.rangedFlash || 0) - dt);
     enemy.attackRecovery = Math.max(0, (enemy.attackRecovery || 0) - dt);
     enemy.phaseTransition = Math.max(0, (enemy.phaseTransition || 0) - dt);
@@ -3761,6 +3805,7 @@ function explode(x, y, directTarget) {
 
 function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightweight = false) {
   const angle = Math.atan2(bullet.vy, bullet.vx);
+  const materialProfile = getImpactMaterialProfile();
   if (!lightweight || game.impactBursts.length < EFFECT_LIMITS.bursts * .65) game.impactBursts.push({
     x,
     y,
@@ -3769,6 +3814,8 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     fx: bullet.fx || "tracer",
     angle,
     sceneId: game.scene.id,
+    material: materialProfile.material,
+    materialColor: materialProfile.color,
     classId: game.player.combatClass.id,
     seed: (enemy?.sway || 0) + (bullet.id || 0) * .173,
     contactAttack: Boolean(bullet.contactAttack),
@@ -3783,7 +3830,7 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
   });
   const particleShape = ["snowball", "icicle", "cryo"].includes(bullet.fx) ? "shard"
     : ["powerArc", "flameArc", "flyingSword", "spiritSword", "spiritPet", "rail", "tracer"].includes(bullet.fx) ? "spark"
-      : ["spell", "serum"].includes(bullet.fx) ? "glyph" : "chip";
+      : ["spell", "serum"].includes(bullet.fx) ? "glyph" : materialProfile.debris;
   const debrisColor = bullet.fx === "flameArc" || bullet.fx === "plasma" ? "#ffb04f" : critical ? "#fff47a" : bullet.color;
   makeDirectionalParticles(x, y, debrisColor, lightweight ? 2 : critical ? 10 : bullet.contactAttack ? 7 : 5, critical ? 185 : 125, angle, .95, particleShape);
   if (!lightweight && (critical || ["serum", "plasma", "tesla", "graviton", "cryo"].includes(bullet.fx))) {
@@ -6522,18 +6569,81 @@ function drawBossSignatureLayer(enemy, s, pass) {
   ctx.restore();
 }
 
+function drawEnemyHitReactionLayer(enemy, s, pulse) {
+  if (!enemy.hitReaction || enemy.hitReactionTimer <= 0 || pulse <= 0) return;
+  enemy.hitReactionRendered = true;
+  const profile = getImpactMaterialProfile();
+  const strength = (enemy.hitReactionStrength || 1) * pulse;
+  const incomingX = -Math.cos(enemy.hitAngle || 0) * s * .48;
+  const incomingY = -Math.sin(enemy.hitAngle || 0) * s * .38 - s * .24;
+  ctx.save();
+  ctx.translate(incomingX, incomingY);
+  ctx.globalAlpha = Math.min(.92, .34 + strength * .58);
+  if (!LOW_POWER_DEVICE && allowExpensiveGlow()) { ctx.shadowColor = profile.color; ctx.shadowBlur = 8 + strength * 8; }
+  if (enemy.hitReaction === "slash") {
+    ctx.rotate((Math.cos(enemy.hitAngle || 0) >= 0 ? -1 : 1) * .72);
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2 + strength * 2.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-s * .76, 0); ctx.quadraticCurveTo(0, -s * .22 * strength, s * .9, 0); ctx.stroke();
+    ctx.strokeStyle = profile.color; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-s * .62, s * .11); ctx.lineTo(s * .75, -s * .08); ctx.stroke();
+  } else if (enemy.hitReaction === "ballistic") {
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.4 + strength * 1.4;
+    for (let ray = 0; ray < 6; ray += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(s * .12, 0); ctx.lineTo(s * (.3 + strength * .34), 0); ctx.stroke(); }
+    ctx.fillStyle = profile.color; ctx.beginPath(); ctx.arc(0, 0, s * (.1 + strength * .08), 0, Math.PI * 2); ctx.fill();
+  } else if (enemy.hitReaction === "crush") {
+    ctx.strokeStyle = profile.color; ctx.lineWidth = 2.5 + strength * 3;
+    ctx.beginPath(); ctx.ellipse(0, s * .16, s * (.48 + strength * .42), s * (.18 + strength * .1), 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.4;
+    for (let crack = -2; crack <= 2; crack += 1) { ctx.beginPath(); ctx.moveTo(crack * s * .14, s * .08); ctx.lineTo(crack * s * .2, s * (.42 + strength * .18)); ctx.stroke(); }
+  } else {
+    ctx.strokeStyle = profile.color; ctx.lineWidth = 1.7 + strength;
+    for (let ring = 0; ring < 2; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, s * (.22 + ring * .21 + strength * .18), s * (.14 + ring * .12), ambienceTime * (ring ? -.8 : 1), 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = "#ffffff";
+    for (let node = 0; node < 4; node += 1) { const angle = node / 4 * Math.PI * 2 + ambienceTime * 2; ctx.beginPath(); ctx.arc(Math.cos(angle) * s * .4, Math.sin(angle) * s * .24, 1.6 + strength * 1.2, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
 function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
   ctx.save();
   const kick = enemy.hitKick || 0;
   const kickAngle = enemy.hitAngle || 0;
+  const reactionDuration = Math.max(.001, enemy.hitReactionMax || 0);
+  const reactionProgress = enemy.hitReactionTimer > 0 ? 1 - enemy.hitReactionTimer / reactionDuration : 1;
+  const reactionPulse = enemy.hitReactionTimer > 0 ? Math.sin(Math.min(1, reactionProgress) * Math.PI) * (enemy.hitReactionStrength || 1) : 0;
+  const reactionMotion = preferences.reduceMotion ? .28 : 1;
+  let reactionRotate = 0;
+  let reactionScaleX = 1;
+  let reactionScaleY = 1;
+  let reactionJitterX = 0;
+  let reactionJitterY = 0;
+  const reactionSide = Math.cos(kickAngle) >= 0 ? 1 : -1;
+  if (enemy.hitReaction === "slash") {
+    reactionRotate = reactionSide * reactionPulse * -.13;
+    reactionScaleX += reactionPulse * .08;
+    reactionScaleY -= reactionPulse * .1;
+  } else if (enemy.hitReaction === "ballistic") {
+    reactionRotate = reactionSide * reactionPulse * -.045;
+    reactionScaleX -= reactionPulse * .07;
+    reactionScaleY += reactionPulse * .055;
+  } else if (enemy.hitReaction === "crush") {
+    reactionScaleX += reactionPulse * .17;
+    reactionScaleY -= reactionPulse * .21;
+    reactionJitterY = reactionPulse * s * .08;
+  } else if (enemy.hitReaction === "elemental") {
+    reactionScaleX += reactionPulse * .06;
+    reactionScaleY += reactionPulse * .04;
+    reactionJitterX = Math.sin(game.elapsed * 92 + enemy.sway) * reactionPulse * s * .055;
+    reactionJitterY = Math.cos(game.elapsed * 78 + enemy.sway) * reactionPulse * s * .035;
+  }
   const windupProgress = enemy.attackWindupMax > 0 && enemy.attackWindup > 0 ? 1 - enemy.attackWindup / enemy.attackWindupMax : 0;
   const attackLean = enemy.attackWindup > 0
     ? (enemy.type === "ranged" || enemy.type === "caster" ? -.055 : -.12 + windupProgress * .15)
     : enemy.attackRecovery > 0 ? .07 * Math.min(1, enemy.attackRecovery / .18) : 0;
-  ctx.translate(enemy.x + Math.cos(kickAngle) * kick, enemy.y + Math.sin(kickAngle) * kick);
-  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean);
+  ctx.translate(enemy.x + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion, enemy.y + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion);
+  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean + reactionRotate * reactionMotion);
+  ctx.scale(1 + (reactionScaleX - 1) * reactionMotion, 1 + (reactionScaleY - 1) * reactionMotion);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (enemy.type === "boss" && enemy.bossReaction > 0) {
     const reaction = Math.min(1, enemy.bossReaction / .32);
@@ -6551,6 +6661,7 @@ function drawEnemy(enemy) {
     if (game.scene.id === "mars") drawMartianEnemy(enemy, s, frozen);
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
+  drawEnemyHitReactionLayer(enemy, s, reactionPulse);
   if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
   if (!LOW_POWER_DEVICE) drawBossSignatureLayer(enemy, s, "front");
 
@@ -6983,6 +7094,7 @@ function drawDivineProjectileCoating(bullet) {
 function drawImpactMaterial(burst, progress, alpha) {
   const count = game.performance.quality > .58 ? 5 : 3;
   const sceneId = burst.sceneId || game.scene.id;
+  const material = burst.material || getImpactMaterialProfile(sceneId).material;
   const seed = burst.seed || .37;
   ctx.save();
   ctx.globalAlpha = alpha * .86;
@@ -6993,22 +7105,22 @@ function drawImpactMaterial(burst, progress, alpha) {
     ctx.rotate(angle);
     ctx.translate(distance, 0);
     ctx.rotate(progress * (i % 2 ? -3.8 : 4.6) + seed);
-    if (sceneId === "snow") {
+    if (material === "ice") {
       ctx.fillStyle = i % 2 ? "#ffffff" : "#8de4ff";
       ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -3); ctx.lineTo(-2, 5); ctx.closePath(); ctx.fill();
-    } else if (sceneId === "hospital") {
+    } else if (material === "membrane") {
       ctx.fillStyle = i % 2 ? "#effff9" : "#72ffd0";
       ctx.fillRect(-2, -7, 4, 14); ctx.fillRect(-7, -2, 14, 4);
-    } else if (sceneId === "orbit") {
+    } else if (material === "alloy") {
       ctx.strokeStyle = i % 2 ? "#ffffff" : "#6deaff"; ctx.lineWidth = 1.4;
       ctx.strokeRect(-5, -5, 10, 10); ctx.fillStyle = colorAlpha("#6deaff", .4); ctx.fillRect(-2, -2, 4, 4);
-    } else if (sceneId === "mars") {
+    } else if (material === "stone") {
       ctx.fillStyle = i % 2 ? "#ffc36b" : "#d94c2d";
       ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-4, -4); ctx.lineTo(-7, 3); ctx.closePath(); ctx.fill();
-    } else if (sceneId === "moon") {
+    } else if (material === "ceramic") {
       ctx.fillStyle = i % 2 ? "#ecebff" : "#8cdfff";
       ctx.beginPath(); ctx.ellipse(0, 0, 7, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-    } else if (sceneId === "cultivation") {
+    } else if (material === "spirit") {
       ctx.fillStyle = i % 2 ? "#fff3c7" : burst.color;
       ctx.fillRect(-7, -1.5, 14, 3); ctx.fillRect(1, -5, 2, 10);
     } else {
@@ -8860,6 +8972,15 @@ if (QA_MODE) {
         poseRendered: Boolean(corpse.poseRendered),
         residueRendered: Boolean(corpse.residueRendered),
       })),
+      enemyHitReactions: game.enemies.filter((enemy) => enemy.hitReactionTimer > 0).slice(-12).map((enemy) => ({
+        id: enemy.id,
+        type: enemy.type,
+        reaction: enemy.hitReaction,
+        material: enemy.hitMaterial,
+        strength: Number((enemy.hitReactionStrength || 0).toFixed(2)),
+        rendered: Boolean(enemy.hitReactionRendered),
+      })),
+      impactMaterials: [...new Set(game.impactBursts.map((burst) => burst.material).filter(Boolean))],
       xpDrops: game.xpDrops.length,
       gearDrops: game.gearDrops.length,
       lootCount: game.loot.length,
