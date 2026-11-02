@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "77";
+const ASSET_REVISION = "78";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -860,8 +860,57 @@ const evolutionSignatureProfiles = {
   },
 };
 
+// Hidden class branches must not inherit the primary path's weapon language.
+// Each branch combines a class silhouette with a world material, producing 21
+// recognizable identities without multiplying expensive particle systems.
+const derivedEvolutionSignatureProfiles = {
+  city: {
+    melee: { id: "neonDragon", name: "霓虹剑气·游龙", color: "#8ff7ff", motif: "circuit" },
+    ranger: { id: "alleyExecution", name: "暗巷刺客·瞬狱", color: "#ff7fd1", motif: "circuit" },
+    mage: { id: "magneticEcho", name: "磁暴法域·回响", color: "#c99cff", motif: "circuit" },
+  },
+  snow: {
+    melee: { id: "snowDragon", name: "踏雪剑气·游龙", color: "#c6f7ff", motif: "frost" },
+    ranger: { id: "snowExecution", name: "雪隐刺客·瞬狱", color: "#d5efff", motif: "frost" },
+    mage: { id: "auroraEcho", name: "极光法域·回响", color: "#bcb8ff", motif: "frost" },
+  },
+  hospital: {
+    melee: { id: "sterileDragon", name: "无菌剑气·游龙", color: "#8dffe0", motif: "cross" },
+    ranger: { id: "silentExecution", name: "静默刺客·瞬狱", color: "#ff8fc9", motif: "cross" },
+    mage: { id: "cellularEcho", name: "细胞法域·回响", color: "#8bffd4", motif: "cross" },
+  },
+  orbit: {
+    melee: { id: "starDragon", name: "星跃剑气·游龙", color: "#82dcff", motif: "orbit" },
+    ranger: { id: "phaseExecution", name: "相位刺客·瞬狱", color: "#db90ff", motif: "orbit" },
+    mage: { id: "stellarEcho", name: "星环法域·回响", color: "#9eacff", motif: "orbit" },
+  },
+  mars: {
+    melee: { id: "redDragon", name: "赤砂剑气·游龙", color: "#ffae75", motif: "flame" },
+    ranger: { id: "huntExecution", name: "荒猎刺客·瞬狱", color: "#ff789e", motif: "flame" },
+    mage: { id: "coronaEcho", name: "日冕法域·回响", color: "#ff8fc7", motif: "flame" },
+  },
+  moon: {
+    melee: { id: "lunarDragon", name: "月影剑气·游龙", color: "#d7ecff", motif: "lunar" },
+    ranger: { id: "voidExecution", name: "寂静刺客·瞬狱", color: "#c7b9ff", motif: "lunar" },
+    mage: { id: "tideEcho", name: "潮汐法域·回响", color: "#b8c8ff", motif: "lunar" },
+  },
+  cultivation: {
+    melee: { id: "windDragon", name: "御风剑气·游龙", color: "#a9ffe0", motif: "spirit" },
+    ranger: { id: "shadowExecution", name: "无影刺客·瞬狱", color: "#ff91d8", motif: "spirit" },
+    mage: { id: "yinyangEcho", name: "两仪法域·回响", color: "#d5b4ff", motif: "spirit" },
+  },
+};
+
 function getEvolutionSignatureProfile(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id) {
   return evolutionSignatureProfiles[sceneId]?.[classId] || null;
+}
+
+function getActiveEvolutionSignatureProfile(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id, player = game?.player) {
+  if (player?.derivedStyle) {
+    const profile = derivedEvolutionSignatureProfiles[sceneId]?.[classId];
+    if (profile) return { ...profile, derivedStyle: player.derivedStyle };
+  }
+  return getEvolutionSignatureProfile(sceneId, classId);
 }
 
 function getSceneCombatModel(sceneId, classId) {
@@ -1724,11 +1773,12 @@ function getProjectileEvolutionState(player = game.player) {
   const awakened = Boolean(player.activeSynergy?.synergy);
   const tier = awakened ? 3 : score >= 3 ? 2 : score >= 1 ? 1 : 0;
   const pathColor = player.branchFocus === "derived" ? derived?.color : primary?.color;
+  const derivedIdentityColor = player.derivedStyle ? derivedEvolutionSignatureProfiles[game.scene.id]?.[player.combatClass.id]?.color : null;
   return {
     tier,
     score,
     label: getProjectileEvolutionLabel(tier),
-    color: player.activeSynergy?.color || pathColor || player.combatClass.color || game.scene.colors.shot,
+    color: derivedIdentityColor || player.activeSynergy?.color || pathColor || player.combatClass.color || game.scene.colors.shot,
     awakened,
   };
 }
@@ -3054,7 +3104,7 @@ function shoot() {
   const assassin = player.derivedStyle === "assassin" && combatClass.id === "ranger";
   const ritualSwarm = player.derivedStyle === "ritualSwarm" && combatClass.id === "mage";
   const evolution = getProjectileEvolutionState(player);
-  const evolutionSignature = getEvolutionSignatureProfile(game.scene.id, combatClass.id);
+  const evolutionSignature = getActiveEvolutionSignatureProfile(game.scene.id, combatClass.id, player);
   const attackId = nextId++;
   const identityPierce = { icicle: 1, laser: 2, rail: 3, flyingSword: 2, spell: 1 }[combatClass.fx] || 0;
   for (let i = 0; i < count; i += 1) {
@@ -3084,6 +3134,8 @@ function shoot() {
       evolutionPrimary: i === Math.floor(count / 2),
       evolutionSignature: evolutionSignature?.id || null,
       evolutionSignatureName: evolutionSignature?.name || null,
+      evolutionMotif: evolutionSignature?.motif || null,
+      derivedStyle: player.derivedStyle || null,
       classId: combatClass.id,
       trail: [],
       age: 0,
@@ -3823,6 +3875,8 @@ function triggerRangerFinisher(enemy, bullet, x, y) {
     enemySize: enemy.size,
     signature: bullet.evolutionSignature,
     name: bullet.evolutionSignatureName,
+    motif: bullet.evolutionMotif,
+    derivedStyle: bullet.derivedStyle,
     color: bullet.evolutionColor || bullet.color,
     time: duration,
     maxTime: duration,
@@ -4092,6 +4146,8 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     evolutionPrimary: bullet.evolutionPrimary !== false,
     evolutionSignature: bullet.evolutionSignature || null,
     evolutionSignatureName: bullet.evolutionSignatureName || null,
+    evolutionMotif: bullet.evolutionMotif || null,
+    derivedStyle: bullet.derivedStyle || null,
   });
   const evolutionTier = bullet.evolutionTier || 0;
   if (!lightweight && evolutionTier >= 3 && game.elapsed - game.lastEvolutionScarAt >= (LOW_POWER_DEVICE ? 2.4 : 1.45)) {
@@ -7579,6 +7635,11 @@ function drawEvolutionProjectileGlyph(bullet, radius) {
   ctx.save();
   ctx.strokeStyle = colorAlpha("#ffffff", .78); ctx.fillStyle = colorAlpha(color, .85); ctx.lineWidth = 1.4;
   const spin = (bullet.age || 0) * 3.4;
+  if (bullet.derivedStyle) {
+    drawDerivedEvolutionGlyph(bullet.derivedStyle, bullet.evolutionMotif, radius, spin, color, "projectile");
+    ctx.restore();
+    return;
+  }
   if (signature === "railLance" || signature === "starRail") {
     for (const y of [-radius * .36, radius * .36]) { ctx.beginPath(); ctx.moveTo(-radius * 1.3, y); ctx.lineTo(radius * 1.3, y * .25); ctx.stroke(); }
     ctx.beginPath(); ctx.moveTo(radius * 1.35, 0); ctx.lineTo(radius * .42, -radius * .55); ctx.lineTo(-radius * .2, 0); ctx.lineTo(radius * .42, radius * .55); ctx.closePath(); ctx.stroke();
@@ -7613,6 +7674,48 @@ function drawEvolutionProjectileGlyph(bullet, radius) {
   } else {
     ctx.rotate(Math.PI / 4 + spin); ctx.strokeRect(-radius * .58, -radius * .58, radius * 1.16, radius * 1.16);
   }
+  ctx.restore();
+}
+
+function drawDerivedThemeMark(motif, radius, phase = 0) {
+  ctx.save();
+  if (motif === "circuit") {
+    ctx.rotate(phase * .18); ctx.strokeRect(-radius * .36, -radius * .36, radius * .72, radius * .72);
+    for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side * radius * .36, 0); ctx.lineTo(side * radius * .84, 0); ctx.lineTo(side * radius, side * radius * .2); ctx.stroke(); }
+  } else if (motif === "frost") {
+    ctx.rotate(phase * .22); for (let arm = 0; arm < 6; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius, 0); ctx.moveTo(radius * .58, 0); ctx.lineTo(radius * .78, -radius * .2); ctx.moveTo(radius * .58, 0); ctx.lineTo(radius * .78, radius * .2); ctx.stroke(); }
+  } else if (motif === "cross") {
+    ctx.rotate(phase * .1); ctx.fillRect(-radius * .13, -radius * .58, radius * .26, radius * 1.16); ctx.fillRect(-radius * .58, -radius * .13, radius * 1.16, radius * .26);
+  } else if (motif === "orbit") {
+    for (let ring = 0; ring < 2; ring += 1) { ctx.save(); ctx.rotate(phase * (ring ? -.18 : .22) + ring * Math.PI / 2); ctx.beginPath(); ctx.ellipse(0, 0, radius, radius * .3, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+  } else if (motif === "flame") {
+    ctx.rotate(phase * .16); for (let ray = 0; ray < 6; ray += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(radius * .28, 0); ctx.lineTo(radius, 0); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(0, -radius * .42); ctx.lineTo(radius * .36, radius * .38); ctx.lineTo(-radius * .36, radius * .38); ctx.closePath(); ctx.fill();
+  } else if (motif === "lunar") {
+    ctx.rotate(phase * .12); ctx.beginPath(); ctx.arc(-radius * .16, 0, radius * .72, -.95, .95); ctx.stroke(); ctx.beginPath(); ctx.arc(radius * .16, 0, radius * .72, Math.PI - .95, Math.PI + .95); ctx.stroke();
+  } else {
+    ctx.rotate(phase * .14); ctx.beginPath(); for (let point = 0; point <= 6; point += 1) { const angle = point * Math.PI * 4 / 6 - Math.PI / 2; if (!point) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawDerivedEvolutionGlyph(style, motif, radius, phase, color, scale = "projectile") {
+  const weight = scale === "attack" ? 1.25 : scale === "impact" ? 1.08 : 1;
+  ctx.save(); ctx.strokeStyle = colorAlpha("#ffffff", .82); ctx.fillStyle = colorAlpha(color, .72); ctx.lineWidth *= weight;
+  if (style === "bladeWave") {
+    ctx.lineWidth = (scale === "attack" ? 4.6 : 2.8) * weight;
+    ctx.beginPath(); ctx.arc(-radius * .25, 0, radius * 1.28, -.92, .92); ctx.stroke();
+    ctx.lineWidth = 1.2 * weight; for (const offset of [-.28, .28]) { ctx.beginPath(); ctx.arc(-radius * .32, 0, radius * (1.05 + offset), -.78, .78); ctx.stroke(); }
+  } else if (style === "assassin") {
+    ctx.beginPath(); ctx.moveTo(radius * 1.35, 0); ctx.lineTo(-radius * .42, -radius * .42); ctx.lineTo(-radius * .08, 0); ctx.lineTo(-radius * .42, radius * .42); ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 1.4 * weight; for (const y of [-radius * .42, 0, radius * .42]) { ctx.beginPath(); ctx.moveTo(-radius * 1.25, y); ctx.lineTo(radius * .45, y * .2); ctx.stroke(); }
+  } else {
+    ctx.rotate(phase * .28); ctx.beginPath(); for (let side = 0; side <= 6; side += 1) { const angle = side / 6 * Math.PI * 2; if (!side) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, radius * .42, 0, Math.PI * 2); ctx.stroke();
+    for (let node = 0; node < 3; node += 1) { const angle = node / 3 * Math.PI * 2; ctx.beginPath(); ctx.arc(Math.cos(angle) * radius, Math.sin(angle) * radius, radius * .12, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.globalAlpha *= .9;
+  drawDerivedThemeMark(motif, radius * (style === "ritualSwarm" ? .72 : .58), phase);
   ctx.restore();
 }
 
@@ -7788,7 +7891,10 @@ function drawRangerFinisher(finisher) {
   ctx.globalAlpha = .25 + reveal * .75;
   ctx.strokeStyle = finisher.color; ctx.fillStyle = colorAlpha(finisher.color, .68); ctx.shadowColor = finisher.color;
   ctx.shadowBlur = LOW_POWER_DEVICE ? 0 : 18; ctx.lineWidth = 2.5;
-  if (["railLance", "starRail"].includes(finisher.signature)) {
+  if (finisher.derivedStyle === "assassin") {
+    ctx.rotate(progress * .4); for (let slash = 0; slash < 3; slash += 1) { ctx.save(); ctx.rotate((slash - 1) * .38); ctx.beginPath(); ctx.moveTo(-radius * 1.05, -radius * .22); ctx.lineTo(radius * 1.25, radius * .12); ctx.stroke(); ctx.restore(); }
+    drawDerivedThemeMark(finisher.motif, radius * .48, progress * 7);
+  } else if (["railLance", "starRail"].includes(finisher.signature)) {
     for (const y of [-10, 0, 10]) { ctx.beginPath(); ctx.moveTo(-radius, y); ctx.lineTo(radius * 1.4, y * .3); ctx.stroke(); }
     ctx.rotate(Math.PI / 4); ctx.strokeRect(-radius * .35, -radius * .35, radius * .7, radius * .7);
   } else if (finisher.signature === "auroraSpear") {
@@ -7812,7 +7918,9 @@ function drawThemedEvolutionImpactGlyph(burst, progress, color) {
   const radius = 15 + progress * 24;
   game.evolutionSignatureRenders.impact = id;
   ctx.save(); ctx.strokeStyle = colorAlpha("#ffffff", .76); ctx.fillStyle = colorAlpha(color, .62); ctx.lineWidth = 1.5;
-  if (id === "railLance" || id === "starRail") {
+  if (burst.derivedStyle) {
+    drawDerivedEvolutionGlyph(burst.derivedStyle, burst.evolutionMotif, radius, progress * 6, color, "impact");
+  } else if (id === "railLance" || id === "starRail") {
     for (const offset of [-.38, 0, .38]) { ctx.beginPath(); ctx.moveTo(-radius * .45, offset * radius); ctx.lineTo(radius * 1.45, offset * radius * .25); ctx.stroke(); }
     ctx.rotate(Math.PI / 4 + progress); ctx.strokeRect(-radius * .42, -radius * .42, radius * .84, radius * .84);
   } else if (id === "auroraSpear") {
@@ -8252,7 +8360,7 @@ function drawClassAttackAnimation(player, attack) {
 
 function drawEvolvedClassAttackSignature(player, eased) {
   const evolution = getProjectileEvolutionState(player);
-  const profile = getEvolutionSignatureProfile(game.scene.id, player.combatClass.id);
+  const profile = getActiveEvolutionSignatureProfile(game.scene.id, player.combatClass.id, player);
   if (!profile || evolution.tier <= 0) return;
   game.evolutionSignatureRenders.attack = profile.id;
   const tier = evolution.tier;
@@ -8265,7 +8373,10 @@ function drawEvolvedClassAttackSignature(player, eased) {
   ctx.strokeStyle = profile.color; ctx.fillStyle = colorAlpha(profile.color, .78); ctx.lineWidth = 1.4 + tier * .65;
   const spin = ambienceTime * (profile.id === "swarmGate" ? 4.2 : 1.8);
 
-  if (profile.id === "railLance" || profile.id === "starRail") {
+  if (profile.derivedStyle) {
+    const derivedRadius = profile.derivedStyle === "bladeWave" ? radius * 1.08 : profile.derivedStyle === "assassin" ? radius * 1.12 : radius;
+    drawDerivedEvolutionGlyph(profile.derivedStyle, profile.motif, derivedRadius, spin + eased * 2, profile.color, "attack");
+  } else if (profile.id === "railLance" || profile.id === "starRail") {
     const rails = LOW_POWER_DEVICE ? 2 : 3;
     for (let rail = 0; rail < rails; rail += 1) { const y = (rail - (rails - 1) / 2) * 10; ctx.beginPath(); ctx.moveTo(-radius * .55, y); ctx.lineTo(radius * 2.15, y * .22); ctx.stroke(); }
     ctx.save(); ctx.translate(radius * .75, 0); ctx.rotate(Math.PI / 4); ctx.strokeRect(-radius * .24, -radius * .24, radius * .48, radius * .48); ctx.restore();
@@ -9865,7 +9976,7 @@ if (QA_MODE) {
       combatClass: game.player.combatClass.id,
       projectileEvolution: {
         ...getProjectileEvolutionState(game.player),
-        signature: getEvolutionSignatureProfile(game.scene.id, game.player.combatClass.id),
+        signature: getActiveEvolutionSignatureProfile(game.scene.id, game.player.combatClass.id, game.player),
         signatureRenders: { ...game.evolutionSignatureRenders },
         projectileRenderedTier: game.projectileEvolutionRendered || 0,
         impactRenderedTier: game.evolutionImpactRendered || 0,
@@ -9876,6 +9987,7 @@ if (QA_MODE) {
       rangerFinisher: game.lastRangerFinisher ? {
         signature: game.lastRangerFinisher.signature,
         name: game.lastRangerFinisher.name,
+        derivedStyle: game.lastRangerFinisher.derivedStyle || null,
         rendered: Boolean(game.lastRangerFinisher.rendered),
         active: game.rangerFinisher === game.lastRangerFinisher,
       } : null,
