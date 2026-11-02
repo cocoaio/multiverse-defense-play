@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "68";
+const ASSET_REVISION = "69";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -1699,6 +1699,9 @@ function makeGame(runType = "main") {
     pickedXp: 0,
     coins: 0,
     loot: [],
+    gearDrops: [],
+    gearPickupFx: null,
+    lastGearPickup: null,
     combo: 0,
     comboTimer: 0,
     shake: 0,
@@ -1995,6 +1998,10 @@ function finishGame(won) {
   paused = true;
   const resourceRun = game.runType === "resource";
   const petRun = game.runType === "petDungeon";
+  if (game.gearDrops.length) {
+    for (const drop of game.gearDrops) if (!drop.collected) game.loot.push(drop.item);
+    game.gearDrops.length = 0;
+  }
   if (resourceRun && won) game.loot.push(createGuaranteedGear(game.sceneIndex >= 3 ? "epic" : "rare"));
   const clearBonus = petRun ? (won ? 90 : 15) : resourceRun ? (won ? 120 + getAccountProgress().level * 6 : 18) : won ? 38 + game.missionLevel * 4 + game.sceneIndex * 10 : 10;
   let salvageCoins = 0;
@@ -2121,6 +2128,10 @@ function update(dt) {
   game.bossShock = Math.max(0, game.bossShock - dt);
   game.player.staggerTimer = Math.max(0, game.player.staggerTimer - dt);
   game.player.damageFlash = Math.max(0, game.player.damageFlash - dt * 2.65);
+  if (game.gearPickupFx) {
+    game.gearPickupFx.time = Math.max(0, game.gearPickupFx.time - dt);
+    if (game.gearPickupFx.time <= 0) game.gearPickupFx = null;
+  }
   game.player.muzzle = Math.max(0, game.player.muzzle - dt * 8);
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
   game.player.attackAnim = Math.max(0, game.player.attackAnim - dt * attackPlaybackRate);
@@ -2131,6 +2142,7 @@ function update(dt) {
     updateVictorySequence(dt);
     if (mode !== "playing") return;
     updateXpDrops(dt);
+    updateGearDrops(dt);
     updateEffects(dt);
     syncHud();
     return;
@@ -2187,6 +2199,7 @@ function update(dt) {
   updateEnemyProjectiles(dt);
   updateBossWarnings(dt);
   updateXpDrops(dt);
+  updateGearDrops(dt);
   updateMedkits(dt);
   updateEffects(dt);
   updateCombatTutorial();
@@ -2245,6 +2258,73 @@ function updateMedkits(dt) {
     }
   }
   game.medkits = game.medkits.filter((kit) => !kit.collected && kit.age < 22);
+}
+
+function spawnGearDrop(item, x, y) {
+  if (!game || !item) return null;
+  if (game.gearDrops.length >= 12) {
+    const oldest = game.gearDrops.shift();
+    if (oldest?.item) game.loot.push(oldest.item);
+  }
+  const drop = {
+    item,
+    x,
+    y,
+    age: 0,
+    pulse: rand(0, Math.PI * 2),
+    seed: Math.random() * Math.PI * 2,
+    collected: false,
+    rendered: false,
+  };
+  game.gearDrops.push(drop);
+  return drop;
+}
+
+function collectGearDrop(drop) {
+  if (!drop || drop.collected) return;
+  drop.collected = true;
+  game.loot.push(drop.item);
+  const rarity = rarityDefinitions[drop.item.rarity] || rarityDefinitions.common;
+  const tier = Math.max(0, ["common", "rare", "epic", "legendary"].indexOf(drop.item.rarity));
+  const rings = 2 + tier;
+  game.gearPickupFx = {
+    time: 1.45 + tier * .12,
+    maxTime: 1.45 + tier * .12,
+    item: drop.item,
+    color: rarity.color,
+    tier,
+    rings,
+    rendered: false,
+  };
+  game.lastGearPickup = { name: drop.item.name, rarity: drop.item.rarity, rings, collectedAt: game.elapsed };
+  game.banner = { text: `${rarity.name}装备已获取`, sub: `${drop.item.name} · ${formatGearStat(drop.item)}`, time: 2.15 };
+  addFloater(game.player.x, game.player.y - 64, `${drop.item.icon} ${rarity.name}装备接入`, rarity.color, 13 + tier);
+  for (let ring = 0; ring < rings; ring += 1) game.shockwaves.push({ x: game.player.x, y: game.player.y, radius: 5 + ring * 8, maxRadius: 72 + ring * 28, life: .58 + ring * .1, maxLife: .58 + ring * .1, color: ring % 2 ? "#ffffff" : rarity.color, lineWidth: 2 + Math.min(3, tier) });
+  makeDirectionalParticles(game.player.x, game.player.y - 12, rarity.color, 18 + tier * 12, 145 + tier * 35, -Math.PI / 2, Math.PI * 1.8, tier >= 2 ? "shard" : "spark");
+  game.shake = Math.max(game.shake, preferences.reduceMotion ? 2 : 4 + tier * 2.2);
+  game.flash = Math.max(game.flash, preferences.reduceMotion ? .08 : .14 + tier * .08);
+  tone(410 + tier * 90, .12, "triangle", .035, 1.45);
+  setTimeout(() => tone(620 + tier * 95, .17, "sine", .028, 1.32), 80);
+  if (tier >= 2) vibrateFeedback(tier === 3 ? [28, 22, 55] : [22, 18, 34]);
+}
+
+function updateGearDrops(dt) {
+  const player = game.player;
+  for (const drop of game.gearDrops) {
+    drop.age += dt;
+    drop.pulse += dt * (2.8 + (drop.item.rarity === "legendary" ? 1.4 : 0));
+    const dx = player.x - drop.x;
+    const dy = player.y - drop.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const victoryPull = game.victorySequence && game.victorySequence.time >= 1.55;
+    if (victoryPull || (drop.age > .25 && distance < player.pickupRange * .85)) {
+      const pull = victoryPull ? Math.min(900, 260 + game.victorySequence.time * 190 + distance) : Math.min(620, 160 + (player.pickupRange - distance) * 7);
+      drop.x += dx / distance * pull * dt;
+      drop.y += dy / distance * pull * dt;
+    }
+    if (distance < 24) collectGearDrop(drop);
+  }
+  game.gearDrops = game.gearDrops.filter((drop) => !drop.collected);
 }
 
 function activateDivineGearTrial() {
@@ -3528,6 +3608,8 @@ function updateVictorySequence(dt) {
       sequence.absorbed = sequence.initialDrops;
       game.xpDrops.length = 0;
     }
+    for (const drop of game.gearDrops) collectGearDrop(drop);
+    game.gearDrops.length = 0;
     sequence.completed = true;
     finishGame(true);
   }
@@ -3603,14 +3685,15 @@ function killEnemy(enemy) {
   const stage = game.sceneIndex * LEVELS_PER_SCENE + game.missionLevel;
   const baseDropChance = enemy.type === "boss" ? Math.min(.92, .68 + stage * .004) : Math.min(.032, .009 + stage * .00034);
   const dropChance = game.runType === "resource" ? Math.min(.96, baseDropChance * (enemy.type === "boss" ? 1 : 3.5)) : baseDropChance;
-  const lootCapacityAvailable = game.runType !== "resource" || game.loot.length < 1;
+  const lootCapacityAvailable = game.runType !== "resource" || game.loot.length + game.gearDrops.length < 1;
   if (lootCapacityAvailable && Math.random() < dropChance) {
     const item = createGear(enemy.type);
-    game.loot.push(item);
+    spawnGearDrop(item, enemy.x + rand(-7, 7), enemy.y + rand(-5, 5));
     const rarity = rarityDefinitions[item.rarity];
-    addFloater(enemy.x, enemy.y - enemy.size - 8, `${item.icon} ${rarity.name}装备`, rarity.color, 11);
-    game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 3, maxRadius: 28, life: .45, color: rarity.color });
-    tone(item.rarity === "legendary" ? 690 : 540, .13, "triangle", .03, 1.45);
+    addFloater(enemy.x, enemy.y - enemy.size - 8, `${item.icon} ${rarity.name}装备掉落 · 靠近拾取`, rarity.color, 11);
+    game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 3, maxRadius: 38, life: .55, color: rarity.color, lineWidth: 3 });
+    makeDirectionalParticles(enemy.x, enemy.y, rarity.color, item.rarity === "legendary" ? 18 : 8, item.rarity === "legendary" ? 145 : 90, -Math.PI / 2, 1.4, "spark");
+    tone(item.rarity === "legendary" ? 690 : 540, .13, "triangle", .025, 1.45);
   }
 
   if (enemy.type === "splitter") {
@@ -4837,6 +4920,7 @@ function render() {
     drawBossScreenShock();
     drawMovementGuide();
     drawBanner();
+    drawGearPickupOverlay();
     drawDivineAwakeningOverlay();
     if (game.flash > 0) {
       const flashAlpha = game.flash * (preferences.reduceMotion ? .065 : .25);
@@ -4910,6 +4994,41 @@ function drawVictorySequenceOverlay() {
   ctx.fillStyle = "rgba(235,246,255,.78)"; ctx.font = "750 9px system-ui"; ctx.fillText(detail, W/2, y + 56);
   ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(50, y + 66, W - 100, 2);
   ctx.fillStyle = sequence.profile.color; ctx.fillRect(50, y + 66, (W - 100) * progress, 2);
+  ctx.restore();
+}
+
+function drawGearPickupOverlay() {
+  const fx = game.gearPickupFx;
+  if (!fx || fx.time <= 0) return;
+  fx.rendered = true;
+  const life = fx.time / fx.maxTime;
+  const appear = Math.min(1, (1 - life) / .16);
+  const fade = Math.min(1, life / .28);
+  const alpha = appear * fade;
+  const centerX = W / 2;
+  const centerY = H * .34;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const vignette = ctx.createRadialGradient(centerX, centerY, 20, centerX, centerY, H * .48);
+  vignette.addColorStop(0, colorAlpha(fx.color, preferences.reduceMotion ? .08 : .18 + fx.tier * .035));
+  vignette.addColorStop(.38, colorAlpha(fx.color, .035));
+  vignette.addColorStop(1, colorAlpha(fx.color, 0));
+  ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+  ctx.translate(centerX, centerY - (1 - appear) * 24);
+  ctx.globalCompositeOperation = "lighter";
+  const rayCount = LOW_POWER_DEVICE ? 5 : 8 + fx.tier * 2;
+  for (let index = 0; index < rayCount; index += 1) {
+    ctx.save(); ctx.rotate(index / rayCount * Math.PI * 2 + ambienceTime * .12);
+    const length = 64 + fx.tier * 12 + (index % 3) * 14;
+    const ray = ctx.createLinearGradient(19, 0, length, 0); ray.addColorStop(0, colorAlpha(fx.color, .36)); ray.addColorStop(1, colorAlpha(fx.color, 0));
+    ctx.fillStyle = ray; ctx.beginPath(); ctx.moveTo(18,-1.5); ctx.lineTo(length,-5); ctx.lineTo(length,5); ctx.lineTo(18,1.5); ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(3,5,10,.88)"; ctx.beginPath(); ctx.roundRect(-138, -37, 276, 74, 13); ctx.fill();
+  ctx.strokeStyle = fx.color; ctx.lineWidth = 1.6 + fx.tier * .35; ctx.beginPath(); ctx.roundRect(-138, -37, 276, 74, 13); ctx.stroke();
+  ctx.fillStyle = fx.color; ctx.font = "950 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(`${(rarityDefinitions[fx.item.rarity] || rarityDefinitions.common).name.toUpperCase()} · EQUIPMENT ACQUIRED`, 0, -20);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 17px system-ui"; ctx.fillText(`${fx.item.icon} ${fx.item.name}`, 0, 1);
+  ctx.fillStyle = colorAlpha(fx.color, .92); ctx.font = "800 10px system-ui"; ctx.fillText(formatGearStat(fx.item), 0, 22);
   ctx.restore();
 }
 
@@ -5272,6 +5391,7 @@ function drawBattlefield() {
   for (const mark of game.groundMarks) if (isWorldPointVisible(mark.x, mark.y, 28)) drawGroundMark(mark);
   for (const corpse of game.corpses) if (isWorldPointVisible(corpse.x, corpse.y, corpse.size + 34)) drawCorpse(corpse);
   for (const drop of game.xpDrops) if (isWorldPointVisible(drop.x, drop.y, 24)) drawXpDrop(drop);
+  for (const drop of game.gearDrops) if (isWorldPointVisible(drop.x, drop.y, 54)) drawGearDrop(drop);
   for (const kit of game.medkits) if (isWorldPointVisible(kit.x, kit.y, 28)) drawMedkit(kit);
   drawDivineDelivery();
   for (const warning of game.bossWarnings) if (isWorldPointVisible(warning.x, warning.y, warning.radius + 24)) drawBossWarning(warning);
@@ -5654,6 +5774,63 @@ function drawXpDrop(drop) {
   } else {
     ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, -2); ctx.lineTo(4, 8); ctx.lineTo(-4, 8); ctx.lineTo(-7, -2); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.82)"; ctx.beginPath(); ctx.arc(-2, -3, 2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawGearGlyph(slot, color = "#ffffff") {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = colorAlpha(color, .2);
+  ctx.lineWidth = 2.2;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  if (slot === "helmet") {
+    ctx.arc(0, 1, 9, Math.PI, Math.PI * 2); ctx.lineTo(9, 7); ctx.lineTo(3, 7); ctx.lineTo(1, 2); ctx.lineTo(-1, 2); ctx.lineTo(-3, 7); ctx.lineTo(-9, 7); ctx.closePath();
+  } else if (slot === "armor") {
+    ctx.moveTo(0, -11); ctx.lineTo(10, -6); ctx.lineTo(7, 8); ctx.lineTo(0, 12); ctx.lineTo(-7, 8); ctx.lineTo(-10, -6); ctx.closePath();
+  } else if (slot === "gloves") {
+    ctx.moveTo(-8, 8); ctx.lineTo(-9, -2); ctx.lineTo(-5, -8); ctx.lineTo(-2, -2); ctx.lineTo(1, -9); ctx.lineTo(4, -2); ctx.lineTo(7, -6); ctx.lineTo(9, 2); ctx.lineTo(5, 10); ctx.closePath();
+  } else if (slot === "boots") {
+    ctx.moveTo(-6, -10); ctx.lineTo(4, -10); ctx.lineTo(4, 3); ctx.lineTo(11, 7); ctx.lineTo(8, 11); ctx.lineTo(-7, 11); ctx.closePath();
+  } else if (slot === "relic") {
+    for (let index = 0; index < 8; index += 1) { const angle = -Math.PI / 2 + index * Math.PI / 4; const radius = index % 2 ? 5 : 11; const x = Math.cos(angle) * radius; const y = Math.sin(angle) * radius; if (!index) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.closePath();
+  } else {
+    ctx.rect(-9, -9, 18, 18); ctx.moveTo(-4, -4); ctx.lineTo(4, -4); ctx.lineTo(4, 4); ctx.lineTo(-4, 4); ctx.closePath();
+  }
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawGearDrop(drop) {
+  drop.rendered = true;
+  const rarity = rarityDefinitions[drop.item.rarity] || rarityDefinitions.common;
+  const tier = Math.max(0, ["common", "rare", "epic", "legendary"].indexOf(drop.item.rarity));
+  const bob = Math.sin(drop.pulse) * 4;
+  const spin = ambienceTime * (.75 + tier * .12) + drop.seed;
+  ctx.save();
+  ctx.translate(drop.x, drop.y + bob);
+  ctx.globalCompositeOperation = "lighter";
+  const beam = ctx.createLinearGradient(0, -92 - tier * 12, 0, 20);
+  beam.addColorStop(0, colorAlpha(rarity.color, 0));
+  beam.addColorStop(.72, colorAlpha(rarity.color, .08 + tier * .025));
+  beam.addColorStop(1, colorAlpha(rarity.color, .28 + tier * .04));
+  ctx.fillStyle = beam;
+  ctx.beginPath(); ctx.moveTo(-7, -92 - tier * 12); ctx.lineTo(7, -92 - tier * 12); ctx.lineTo(28 + tier * 4, 17); ctx.lineTo(-28 - tier * 4, 17); ctx.closePath(); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.beginPath(); ctx.ellipse(0, 17, 25 + tier * 3, 8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.rotate(spin); ctx.strokeStyle = colorAlpha(rarity.color, .7); ctx.lineWidth = 2;
+  for (let ring = 0; ring < 1 + Math.min(2, tier); ring += 1) { ctx.beginPath(); ctx.setLineDash([7 + ring * 2, 6]); ctx.ellipse(0, 3, 24 + ring * 7, 9 + ring * 3, ring * .45, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.setLineDash([]); ctx.restore();
+  ctx.shadowColor = rarity.color; ctx.shadowBlur = LOW_POWER_DEVICE ? 6 : 12 + tier * 3;
+  const caseGradient = ctx.createLinearGradient(-16, -15, 17, 15);
+  caseGradient.addColorStop(0, colorAlpha("#ffffff", .88)); caseGradient.addColorStop(.22, rarity.color); caseGradient.addColorStop(1, colorAlpha(rarity.color, .35));
+  ctx.fillStyle = caseGradient; ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(17,-8); ctx.lineTo(15,12); ctx.lineTo(0,20); ctx.lineTo(-15,12); ctx.lineTo(-17,-8); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.76)"; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.shadowBlur = 0; drawGearGlyph(drop.item.slot, "#ffffff");
+  if (tier >= 2 && !LOW_POWER_DEVICE) {
+    ctx.fillStyle = rarity.color;
+    for (let index = 0; index < 4 + tier; index += 1) { const angle = spin * -1.5 + index / (4 + tier) * Math.PI * 2; const radius = 32 + Math.sin(ambienceTime * 3 + index) * 4; ctx.save(); ctx.translate(Math.cos(angle) * radius, Math.sin(angle) * radius * .45); ctx.rotate(angle); ctx.fillRect(-2, -5, 4, 10); ctx.restore(); }
   }
   ctx.restore();
 }
@@ -8609,6 +8786,13 @@ if (QA_MODE) {
       lives: game.lives,
       corpses: game.corpses.length,
       xpDrops: game.xpDrops.length,
+      gearDrops: game.gearDrops.length,
+      lootCount: game.loot.length,
+      gearPickup: game.lastGearPickup ? {
+        ...game.lastGearPickup,
+        overlayRendered: Boolean(game.gearPickupFx?.rendered),
+        active: Boolean(game.gearPickupFx),
+      } : null,
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
       pacing: {
