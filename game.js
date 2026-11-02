@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "73";
+const ASSET_REVISION = "74";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -1667,6 +1667,101 @@ function getUpgradePresentation(definition) {
   return game.scene.endless ? cultivationUpgradeNames[definition.id] || classPresentation || definition : classPresentation || definition;
 }
 
+function captureUpgradeStats(player = game.player) {
+  return {
+    damage: player.damage,
+    attackRate: 1 / player.fireInterval,
+    bulletCount: player.bulletCount,
+    pierce: player.pierce,
+    explosionChance: player.explosionChance,
+    explosionRadius: player.explosionRadius,
+    slowChance: player.slowChance,
+    critChance: player.critChance,
+    range: player.projectileLife,
+    moveSpeed: player.moveSpeed,
+    maxHealth: game.maxHealth,
+    health: game.health,
+    spiritPetLevel: player.spiritPetLevel,
+    spiritPets: player.spiritPets,
+    swordCount: player.swordCount,
+    wardLevel: player.wardLevel,
+    tribulationLevel: player.tribulationLevel,
+    lotusLevel: player.lotusLevel,
+    talismanLevel: player.talismanLevel,
+  };
+}
+
+function buildUpgradeDeltas(before, after) {
+  const deltas = [];
+  const addPercent = (key, label) => {
+    if (after[key] > before[key] + .0001) deltas.push({ label, value: `+${Math.round((after[key] / Math.max(.0001, before[key]) - 1) * 100)}%` });
+  };
+  const addPoints = (key, label) => {
+    const delta = after[key] - before[key];
+    if (delta > .0001) deltas.push({ label, value: `+${Math.round(delta * 100)}%` });
+  };
+  const addWhole = (key, label) => {
+    const delta = Math.round(after[key] - before[key]);
+    if (delta > 0) deltas.push({ label, value: `+${delta}` });
+  };
+  addPercent("damage", "伤害");
+  addPercent("attackRate", "攻速");
+  addWhole("bulletCount", "弹道");
+  addWhole("pierce", "穿透");
+  addPoints("explosionChance", "爆破率");
+  addWhole("explosionRadius", "爆破半径");
+  addPoints("slowChance", "控制率");
+  addPoints("critChance", "暴击率");
+  addPercent("range", "攻击距离");
+  addPercent("moveSpeed", "移动速度");
+  addWhole("maxHealth", "生命上限");
+  addWhole("health", "即时生命");
+  addWhole("spiritPetLevel", "御兽修为");
+  addWhole("spiritPets", "灵宠数量");
+  addWhole("swordCount", "护体飞剑");
+  addWhole("wardLevel", "护体阵阶");
+  addWhole("tribulationLevel", "雷劫层数");
+  addWhole("lotusLevel", "金莲层数");
+  addWhole("talismanLevel", "符域层数");
+  return deltas.slice(0, 4);
+}
+
+function getUpgradePathFeedback(definition) {
+  const primary = getSceneSkillGroup();
+  const derived = getDerivedSkillGroup();
+  if (definition.cultivationOnly) return { label: "仙途奇术", color: "#efc8ff" };
+  if (primary && [primary.core, primary.link, primary.aux].includes(definition.id)) return { label: "主题主路线", color: primary.color };
+  if (derived && [derived.core, derived.link, derived.aux].includes(definition.id)) return { label: "衍生路线", color: derived.color };
+  return { label: "通用战术", color: game.player.combatClass.color || game.scene.colors.shot };
+}
+
+function createUpgradeFeedback(definition, rank, before, after, awakenedSynergy = null) {
+  const presentation = getUpgradePresentation(definition);
+  const path = getUpgradePathFeedback(definition);
+  const feedback = {
+    id: definition.id,
+    icon: definition.icon,
+    name: presentation.name,
+    rank,
+    path: path.label,
+    color: path.color,
+    deltas: buildUpgradeDeltas(before, after),
+    awakenedSynergy,
+    time: 2.45,
+    maxTime: 2.45,
+    rendered: false,
+    auraRendered: false,
+  };
+  game.upgradeFeedback = feedback;
+  game.lastUpgradeFeedback = feedback;
+  game.flash = Math.max(game.flash, .22);
+  game.shockwaves.push({ x: game.player.x, y: game.player.y, radius: 10, maxRadius: 112, life: .78, color: path.color, lineWidth: 4 });
+  makeDirectionalParticles(game.player.x, game.player.y + 15, path.color, LOW_POWER_DEVICE ? 10 : 20, 145, -Math.PI / 2, 1.2, "spark");
+  addFloater(game.player.x, game.player.y - 68, `${presentation.name} · ${rank} 重`, path.color, 12);
+  tone(520, .12, "triangle", .035, 1.5);
+  setTimeout(() => tone(780, .16, "sine", .025, 1.3), 70);
+}
+
 function saveMeta() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(meta));
 }
@@ -1773,6 +1868,8 @@ function makeGame(runType = "main") {
     gearDrops: [],
     gearPickupFx: null,
     lastGearPickup: null,
+    upgradeFeedback: null,
+    lastUpgradeFeedback: null,
     combo: 0,
     comboTimer: 0,
     shake: 0,
@@ -2202,6 +2299,10 @@ function update(dt) {
   if (game.gearPickupFx) {
     game.gearPickupFx.time = Math.max(0, game.gearPickupFx.time - dt);
     if (game.gearPickupFx.time <= 0) game.gearPickupFx = null;
+  }
+  if (game.upgradeFeedback) {
+    game.upgradeFeedback.time = Math.max(0, game.upgradeFeedback.time - dt);
+    if (game.upgradeFeedback.time <= 0) game.upgradeFeedback = null;
   }
   game.player.muzzle = Math.max(0, game.player.muzzle - dt * 8);
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
@@ -4082,6 +4183,8 @@ function showUpgradeChoices() {
 
 function chooseUpgrade(definition) {
   const player = game.player;
+  const beforeStats = captureUpgradeStats(player);
+  const synergyBefore = player.activeSynergy?.synergy || null;
   const nextRank = (player.upgrades[definition.id] || 0) + 1;
   player.upgrades[definition.id] = nextRank;
   const primary = getSceneSkillGroup();
@@ -4091,8 +4194,9 @@ function chooseUpgrade(definition) {
   if (game.scene.endless && nextRank > definition.max && !definition.cultivationOnly) applyEndlessOverflow(definition.id, player);
   else definition.apply(player);
   activateHiddenSkillSynergy(player);
+  const synergyAfter = player.activeSynergy?.synergy || null;
+  createUpgradeFeedback(definition, nextRank, beforeStats, captureUpgradeStats(player), synergyAfter !== synergyBefore ? synergyAfter : null);
   game.pendingLevels -= 1;
-  tone(460, 0.12, "triangle", 0.04, 1.6);
   if (game.pendingLevels > 0) showUpgradeChoices();
   else {
     ui.upgrade.classList.add("hidden");
@@ -5040,6 +5144,7 @@ function render() {
     drawBossScreenShock();
     drawMovementGuide();
     drawBanner();
+    drawUpgradeFeedback();
     drawGearPickupOverlay();
     drawDivineAwakeningOverlay();
     if (game.flash > 0) {
@@ -5149,6 +5254,75 @@ function drawGearPickupOverlay() {
   ctx.fillStyle = fx.color; ctx.font = "950 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(`${(rarityDefinitions[fx.item.rarity] || rarityDefinitions.common).name.toUpperCase()} · EQUIPMENT ACQUIRED`, 0, -20);
   ctx.fillStyle = "#ffffff"; ctx.font = "950 17px system-ui"; ctx.fillText(`${fx.item.icon} ${fx.item.name}`, 0, 1);
   ctx.fillStyle = colorAlpha(fx.color, .92); ctx.font = "800 10px system-ui"; ctx.fillText(formatGearStat(fx.item), 0, 22);
+  ctx.restore();
+}
+
+function drawUpgradeAura(player) {
+  const fx = game.upgradeFeedback;
+  if (!fx || fx.time <= 0) return;
+  fx.auraRendered = true;
+  const progress = 1 - fx.time / fx.maxTime;
+  const fade = Math.min(1, fx.time / .4);
+  const pulse = preferences.reduceMotion ? 1 : .88 + Math.sin(ambienceTime * 10) * .12;
+  ctx.save();
+  ctx.translate(player.x, player.y + 13);
+  ctx.globalAlpha = fade;
+  ctx.globalCompositeOperation = "lighter";
+  const halo = ctx.createRadialGradient(0, 0, 8, 0, 0, 72 * pulse);
+  halo.addColorStop(0, colorAlpha(fx.color, .22));
+  halo.addColorStop(.5, colorAlpha(fx.color, .1));
+  halo.addColorStop(1, colorAlpha(fx.color, 0));
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.ellipse(0, 0, 76, 35, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = colorAlpha(fx.color, .72); ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.ellipse(0, 13, 34 + progress * 18, 12 + progress * 5, 0, 0, Math.PI * 2); ctx.stroke();
+  const orbitCount = LOW_POWER_DEVICE || preferences.reduceMotion ? 3 : 6;
+  for (let index = 0; index < orbitCount; index += 1) {
+    const angle = index / orbitCount * Math.PI * 2 + (preferences.reduceMotion ? 0 : ambienceTime * 2.4);
+    const radius = 38 + (index % 2) * 8;
+    ctx.fillStyle = index % 2 ? "#ffffff" : fx.color;
+    ctx.beginPath(); ctx.arc(Math.cos(angle) * radius, Math.sin(angle) * radius * .43 - 10, 2.2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawUpgradeFeedback() {
+  const fx = game.upgradeFeedback;
+  if (!fx || fx.time <= 0) return;
+  fx.rendered = true;
+  const elapsed = fx.maxTime - fx.time;
+  const appear = Math.min(1, elapsed / .18);
+  const fade = Math.min(1, fx.time / .34);
+  const width = Math.min(W - 36, 354);
+  const height = fx.awakenedSynergy ? 104 : 91;
+  const x = (W - width) / 2;
+  const y = Math.min(H * .31, 260) - height / 2;
+  ctx.save();
+  ctx.globalAlpha = appear * fade;
+  ctx.translate(0, preferences.reduceMotion ? 0 : (1 - appear) * 18);
+  const glow = ctx.createRadialGradient(W / 2, y + height / 2, 12, W / 2, y + height / 2, width * .7);
+  glow.addColorStop(0, colorAlpha(fx.color, .14)); glow.addColorStop(1, colorAlpha(fx.color, 0));
+  ctx.fillStyle = glow; ctx.fillRect(0, y - 40, W, height + 80);
+  ctx.fillStyle = "rgba(3,7,12,.9)"; ctx.beginPath(); ctx.roundRect(x, y, width, height, 14); ctx.fill();
+  ctx.strokeStyle = colorAlpha(fx.color, .82); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x, y, width, height, 14); ctx.stroke();
+  ctx.fillStyle = colorAlpha(fx.color, .12); ctx.beginPath(); ctx.roundRect(x + 7, y + 7, 52, height - 14, 10); ctx.fill();
+  ctx.fillStyle = fx.color; ctx.font = "950 27px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(fx.icon, x + 33, y + height / 2);
+  ctx.textAlign = "left";
+  ctx.fillStyle = fx.color; ctx.font = "850 8px system-ui"; ctx.fillText(`${fx.path.toUpperCase()} · 第 ${fx.rank} 重`, x + 70, y + 18);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 16px system-ui"; ctx.fillText(fx.name, x + 70, y + 39);
+  let chipX = x + 70;
+  const chipY = y + 60;
+  for (const delta of fx.deltas) {
+    const label = `${delta.label} ${delta.value}`;
+    ctx.font = "800 8px system-ui";
+    const chipWidth = Math.ceil(ctx.measureText(label).width) + 13;
+    if (chipX + chipWidth > x + width - 8) break;
+    ctx.fillStyle = colorAlpha(fx.color, .13); ctx.beginPath(); ctx.roundRect(chipX, chipY, chipWidth, 18, 6); ctx.fill();
+    ctx.fillStyle = colorAlpha(fx.color, .95); ctx.fillText(label, chipX + 6, chipY + 10); chipX += chipWidth + 5;
+  }
+  if (fx.awakenedSynergy) {
+    ctx.fillStyle = "rgba(255,255,255,.66)"; ctx.font = "750 8px system-ui";
+    ctx.fillText(`质变觉醒 · ${fx.awakenedSynergy}`, x + 70, y + 91);
+  }
   ctx.restore();
 }
 
@@ -5529,6 +5703,7 @@ function drawBattlefield() {
   for (const actor of actors) {
     drawActorGrounding(actor);
     if (actor === game.player) {
+      drawUpgradeAura(game.player);
       drawBase();
       drawClassAttackAnimation(game.player, game.player.attackAnim);
     }
@@ -9194,6 +9369,17 @@ if (QA_MODE) {
         ...game.lastGearPickup,
         overlayRendered: Boolean(game.gearPickupFx?.rendered),
         active: Boolean(game.gearPickupFx),
+      } : null,
+      upgradeFeedback: game.lastUpgradeFeedback ? {
+        id: game.lastUpgradeFeedback.id,
+        name: game.lastUpgradeFeedback.name,
+        rank: game.lastUpgradeFeedback.rank,
+        path: game.lastUpgradeFeedback.path,
+        deltas: game.lastUpgradeFeedback.deltas,
+        awakenedSynergy: game.lastUpgradeFeedback.awakenedSynergy,
+        rendered: Boolean(game.lastUpgradeFeedback.rendered),
+        auraRendered: Boolean(game.lastUpgradeFeedback.auraRendered),
+        active: game.upgradeFeedback === game.lastUpgradeFeedback,
       } : null,
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
