@@ -1528,7 +1528,8 @@ function makeGame(runType = "main") {
   const divine = divineState.unlocked ? getDivineGearCombatStats(divineState.level, selectedSceneIndex) : { damage: 0, health: 0, crit: 0, pulse: 0 };
   const endlessNoviceGrace = scene.endless ? Math.max(0, Math.min(1, (360 - getCombatPower(combatClass.id)) / 260)) : 0;
   const maxHealth = Math.round((170 * (1 + meta.upgrades.wall * 0.08) + gear.health + divine.health) * combatClass.health * (1 + resonance.health) * (1 + endlessNoviceGrace * .45));
-  const missionTarget = runType === "petDungeon" ? 62 : runType === "resource" ? 45 : scene.endless ? Infinity : 26 + selectedSceneIndex * 6 + missionLevel * 3;
+  const newPlayerRamp = runType === "main" && selectedSceneIndex === 0 && missionLevel <= 2 && meta.wins < 2;
+  const missionTarget = runType === "petDungeon" ? 62 : runType === "resource" ? 45 : scene.endless ? Infinity : newPlayerRamp ? 22 + missionLevel * 3 : 26 + selectedSceneIndex * 6 + missionLevel * 3;
   const isDivineTutorialStage = selectedSceneIndex === 0 && missionLevel <= 2;
   const shouldDeliverDivineGear = runType === "main" && isDivineTutorialStage && !divineState.unlocked;
   return {
@@ -1539,7 +1540,7 @@ function makeGame(runType = "main") {
     runType,
     difficulty: runType === "petDungeon" ? 1.48 + meta.petDungeon.clears * .07 : runType === "resource" ? .88 + selectedSceneIndex * .07 : scene.endless ? 1 : 1 + selectedSceneIndex * 0.11 + (missionLevel - 1) * 0.055,
     endlessNoviceGrace,
-    waveSeconds: QA_MODE ? 2 : runType === "petDungeon" ? 9.5 : runType === "resource" ? 8.5 : 11.5 + Math.min(2.5, missionLevel * 0.22),
+    waveSeconds: QA_MODE ? 2 : runType === "petDungeon" ? 9.5 : runType === "resource" ? 8.5 : newPlayerRamp ? 9.6 + missionLevel * .4 : 11.5 + Math.min(2.5, missionLevel * 0.22),
     elapsed: 0,
     wave: 1,
     maxHealth,
@@ -1575,6 +1576,10 @@ function makeGame(runType = "main") {
     move: { x: 0, y: 0 },
     director: 1,
     directorTimer: 0,
+    newPlayerRamp,
+    openingGrace: newPlayerRamp ? 8 : 0,
+    pacingCueShown: false,
+    initialEnemyCount: newPlayerRamp ? 3 : 5,
     spawnTimer: 0.45,
     shotTimer: 0.1,
     performance: {
@@ -1602,7 +1607,7 @@ function makeGame(runType = "main") {
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
-    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · ${combatModel.weapon} · 初入仙域获得护道加持` : `${combatClass.name} · ${combatModel.weapon} · 靠近拾取经验`, time: 2.3 },
+    banner: { text: runType === "petDungeon" ? "灵宠试炼" : runType === "resource" ? "丰饶之境" : `${scene.shortName} ${String(missionLevel).padStart(2, "0")}`, sub: runType === "petDungeon" ? `${combatClass.name} · 首次试炼强敌压境，救援复活可逆转战局` : runType === "resource" ? `${combatClass.name} · 击破补给兽群，夺取装备与补给币` : scene.endless && endlessNoviceGrace > 0 ? `${combatClass.name} · ${combatModel.weapon} · 初入仙域获得护道加持` : newPlayerRamp ? `${combatClass.name} · 先移动拾取经验，尸潮将在 8 秒后升压` : `${combatClass.name} · ${combatModel.weapon} · 靠近拾取经验`, time: 2.3 },
     player: {
       weapon,
       combatClass,
@@ -1727,7 +1732,10 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   game = makeGame(runType);
   const launchTutorial = runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
     && !meta.tutorial.completed && (tutorialFlow.battlePending || shouldAutoStartTutorial());
-  for (let index = 0; index < 5; index += 1) spawnEnemy(index === 4 ? "runner" : "grunt", null, null, index / 5 * Math.PI * 2 - Math.PI / 2);
+  for (let index = 0; index < game.initialEnemyCount; index += 1) {
+    const type = index === game.initialEnemyCount - 1 && !game.newPlayerRamp ? "runner" : "grunt";
+    spawnEnemy(type, null, null, index / game.initialEnemyCount * Math.PI * 2 - Math.PI / 2);
+  }
   document.querySelector("#app").dataset.scene = game.scene.id;
   mode = "playing";
   paused = false;
@@ -1875,6 +1883,7 @@ function returnHome() {
 
 function update(dt) {
   game.elapsed += dt;
+  game.openingGrace = Math.max(0, game.newPlayerRamp ? 8 - game.elapsed : 0);
   game.flash = Math.max(0, game.flash - dt);
   game.divineAwakening = Math.max(0, game.divineAwakening - dt);
   updateDivineOverdrive(dt);
@@ -1896,6 +1905,14 @@ function update(dt) {
   updateOrbitGalaxyDefense(dt);
   updateDirector(dt);
 
+  if (game.newPlayerRamp && !game.pacingCueShown && game.elapsed >= 8) {
+    game.pacingCueShown = true;
+    game.banner = { text: "尸潮升压", sub: "保持移动，利用刚获得的强化撕开包围", time: 2.25 };
+    game.shockwaves.push({ x: game.player.x, y: game.player.y, radius: 20, maxRadius: 170, life: .58, maxLife: .58, color: game.scene.palette.accent });
+    game.flash = Math.max(game.flash, .12);
+    tone(126, .09, "sawtooth", .035, 1.32);
+  }
+
   const nextWave = game.scene.endless ? Math.floor(game.elapsed / game.waveSeconds) + 1 : Math.min(TOTAL_WAVES, Math.floor(game.elapsed / game.waveSeconds) + 1);
   if (nextWave !== game.wave) {
     game.wave = nextWave;
@@ -1916,7 +1933,8 @@ function update(dt) {
     const amount = game.wave >= 4 && Math.random() < reinforcementChance * game.director ? 2 : 1;
     for (let i = 0; i < amount; i += 1) spawnEnemy(pickEnemyType());
     const pressure = (0.98 - game.wave * 0.092 - Math.min(game.elapsed / 800, 0.1)) / game.levelModifier.spawn;
-    game.spawnTimer = Math.max(0.24, pressure / game.director) * rand(0.8, 1.2);
+    const openingSpawnScale = game.newPlayerRamp ? 1.28 - Math.min(1, game.elapsed / 24) * .28 : 1;
+    game.spawnTimer = Math.max(0.24, pressure / game.director) * openingSpawnScale * rand(0.8, 1.2);
   }
 
   game.shotTimer -= dt;
@@ -2228,12 +2246,17 @@ function updateDirector(dt) {
   game.directorTimer = 1.2;
   const healthRatio = game.health / game.maxHealth;
   const crowd = game.enemies.length;
-  let desired = .64 + healthRatio * .86;
+  let desired = .7 + healthRatio * .68;
   if (crowd > 34) desired -= .2;
-  if (crowd < 12 && healthRatio > .65) desired += .1;
-  desired = Math.max(.66, Math.min(1.5, desired));
+  if (crowd < 10 && healthRatio > .65) desired += .06;
+  if (game.newPlayerRamp) {
+    const openingRamp = .68 + Math.min(1, game.elapsed / 28) * .32;
+    desired *= openingRamp;
+    if (game.elapsed < 10) desired = Math.min(desired, .88);
+  }
+  desired = Math.max(.66, Math.min(1.48, desired));
   game.director += (desired - game.director) * .22;
-  game.director = Math.max(.66, Math.min(1.5, game.director));
+  game.director = Math.max(.66, Math.min(1.48, game.director));
 }
 
 function pickEnemyType() {
@@ -7343,6 +7366,14 @@ if (QA_MODE) {
       corpses: game.corpses.length,
       position: { x: game.player.x, y: game.player.y },
       director: game.director,
+      pacing: {
+        newPlayerRamp: game.newPlayerRamp,
+        openingGrace: Number(game.openingGrace.toFixed(1)),
+        cueShown: game.pacingCueShown,
+        initialEnemyCount: game.initialEnemyCount,
+        missionTarget: game.missionTarget,
+        waveSeconds: game.waveSeconds,
+      },
       performance: {
         profile: PERFORMANCE_PROFILE.name,
         quality: Number(game.performance.quality.toFixed(2)),
