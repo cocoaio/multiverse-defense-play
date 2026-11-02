@@ -1,5 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
+const ASSET_REVISION = "59";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -19,6 +20,7 @@ function createAssetImage(src, eager = false, fallbackSrc = "") {
   image.dataset.assetState = "idle";
   image.addEventListener("load", () => {
     image.dataset.assetState = "ready";
+    image.dataset.recoveryPending = "false";
     image.dispatchEvent(new Event("assetready"));
   });
   image.addEventListener("error", () => {
@@ -28,6 +30,7 @@ function createAssetImage(src, eager = false, fallbackSrc = "") {
       return;
     }
     image.dataset.assetState = "failed";
+    image.dataset.recoveryPending = "false";
     image.dispatchEvent(new Event("assetfailed"));
   });
   if (eager) {
@@ -35,6 +38,36 @@ function createAssetImage(src, eager = false, fallbackSrc = "") {
     image.src = image.dataset.src;
   }
   return image;
+}
+
+function isAssetRenderable(image) {
+  return Boolean(image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0 && image.dataset.qaForceFallback !== "true");
+}
+
+function recoverAssetImage(image) {
+  if (!image || image.dataset.recoveryPending === "true" || image.dataset.qaForceFallback === "true") return;
+  image.dataset.recoveryPending = "true";
+  image.dataset.assetState = "recovering";
+  const canonical = image.dataset.primarySrc || image.dataset.src;
+  window.setTimeout(() => {
+    const separator = canonical.includes("?") ? "&" : "?";
+    image.src = `${canonical}${separator}asset=${ASSET_REVISION}&recover=${Date.now()}`;
+  }, 120);
+}
+
+function drawImageSafe(image, ...args) {
+  if (!isAssetRenderable(image)) {
+    recoverAssetImage(image);
+    return false;
+  }
+  try {
+    ctx.drawImage(image, ...args);
+    return true;
+  } catch (error) {
+    image.dataset.assetState = "render-failed";
+    recoverAssetImage(image);
+    return false;
+  }
 }
 
 function ensureImageLoaded(image) {
@@ -194,7 +227,6 @@ async function preloadAllGameAssets() {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       partial.set(entry.path, 0);
       render(displayName);
-      let objectUrl = "";
       try {
         if (location.protocol === "file:") {
           const ready = await assignBootAsset(entry, entry.path);
@@ -202,8 +234,9 @@ async function preloadAllGameAssets() {
         } else {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), LOW_POWER_DEVICE ? 26000 : 21000);
-          const retrySuffix = attempt ? `${entry.path.includes("?") ? "&" : "?"}retry=${Date.now()}` : "";
-          const response = await fetch(entry.path + retrySuffix, { cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timeout));
+          const separator = entry.path.includes("?") ? "&" : "?";
+          const assetUrl = `${entry.path}${separator}asset=${ASSET_REVISION}${attempt ? `&retry=${Date.now()}` : ""}`;
+          const response = await fetch(assetUrl, { cache: "reload", signal: controller.signal }).finally(() => clearTimeout(timeout));
           if (!response.ok) throw new Error(`${response.status}: ${entry.path}`);
           const reader = response.body?.getReader();
           const chunks = [];
@@ -218,9 +251,11 @@ async function preloadAllGameAssets() {
               render(displayName);
             }
           } else chunks.push(new Uint8Array(await response.arrayBuffer()));
-          const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
-          objectUrl = URL.createObjectURL(blob);
-          const ready = await assignBootAsset(entry, objectUrl);
+          // Keep critical art on a stable same-origin URL. iOS may evict decoded
+          // images backed only by temporary blob URLs when the battle canvas grows.
+          // The completed fetch is stored in the HTTP cache, so assigning the same
+          // URL here does not normally transfer the file twice.
+          const ready = await assignBootAsset(entry, assetUrl);
           if (!ready) throw new Error(`decode failed: ${entry.path}`);
         }
         partial.delete(entry.path);
@@ -229,7 +264,6 @@ async function preloadAllGameAssets() {
         return true;
       } catch (error) {
         partial.delete(entry.path);
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
         if (attempt === 0) {
           label.textContent = `${displayName} 网络波动 · 自动重试`;
           await new Promise((resolve) => setTimeout(resolve, 380));
@@ -800,6 +834,7 @@ let muted = !preferences.sfx;
 let lastFrame = performance.now();
 let nextFrameAt = lastFrame;
 let ambienceTime = 0;
+let renderFailureCount = 0;
 let nextId = 1;
 let toastTimer = 0;
 let audioContext = null;
@@ -2222,7 +2257,8 @@ function drawCompanionPet() {
   aura.addColorStop(0, colorAlpha(pet.color, .22)); aura.addColorStop(1, colorAlpha(pet.color, 0));
   ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, 0, 37, 0, Math.PI * 2); ctx.fill();
   ctx.globalCompositeOperation = "source-over";
-  if (companionAtlas.complete && companionAtlas.naturalWidth) {
+  let spriteRendered = false;
+  if (isAssetRenderable(companionAtlas)) {
     const sourceWidth = companionAtlas.naturalWidth / 3;
     const facing = Math.cos(ambienceTime * .9 + Math.PI * .72) < 0 ? -1 : 1;
     const attackPulse = game.player.companionPetTimer > pet.interval - .16 ? Math.sin((pet.interval - game.player.companionPetTimer) / .16 * Math.PI) : 0;
@@ -2231,8 +2267,9 @@ function drawCompanionPet() {
     ctx.shadowColor = pet.color; ctx.shadowBlur = 14 + attackPulse * 12;
     const width = pet.id === "warHound" ? 78 : 72;
     const height = pet.id === "herbSprite" ? 63 : 66;
-    ctx.drawImage(companionAtlas, sourceWidth * pet.spriteIndex, 0, sourceWidth, companionAtlas.naturalHeight, -width / 2, -height * .69, width, height);
-  } else {
+    spriteRendered = drawImageSafe(companionAtlas, sourceWidth * pet.spriteIndex, 0, sourceWidth, companionAtlas.naturalHeight, -width / 2, -height * .69, width, height);
+  }
+  if (!spriteRendered) {
     ctx.shadowColor = pet.color; ctx.shadowBlur = 12; ctx.fillStyle = colorAlpha(pet.color, .92);
     ctx.beginPath(); ctx.ellipse(0, 0, 15, 10, -.1, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(12, -7, 8, 0, Math.PI * 2); ctx.fill();
@@ -5062,7 +5099,7 @@ function drawWorldDecor() {
   const top = game.player.y - H / (2 * zoom) - 90;
   const bottom = game.player.y + H / (2 * zoom) + 90;
   const texture = battlefieldTextures[scene.id];
-  if (texture?.complete && texture.naturalWidth) {
+  if (isAssetRenderable(texture)) {
     drawWorldTexture(texture, left, right, top, bottom, scene.id);
     if (scene.id === "cultivation") drawCultivationDomainDecor(left, right, top, bottom);
     return;
@@ -5090,7 +5127,7 @@ function drawWorldDecor() {
     }
   } else if (scene.id === "hospital") {
     const arenaSize = 980;
-    if (hospitalBattlefield.complete && hospitalBattlefield.naturalWidth) {
+    if (isAssetRenderable(hospitalBattlefield)) {
       ctx.save(); ctx.globalAlpha = .86;
       const startX = Math.floor((left + arenaSize / 2) / arenaSize);
       const endX = Math.floor((right + arenaSize / 2) / arenaSize);
@@ -5101,7 +5138,7 @@ function drawWorldDecor() {
           const x = gx * arenaSize - arenaSize / 2;
           const y = gy * arenaSize - arenaSize / 2;
           ctx.save(); ctx.translate(x + arenaSize / 2, y + arenaSize / 2); ctx.scale(gx % 2 ? -1 : 1, gy % 2 ? -1 : 1);
-          ctx.drawImage(hospitalBattlefield, -arenaSize / 2, -arenaSize / 2, arenaSize, arenaSize); ctx.restore();
+          drawImageSafe(hospitalBattlefield, -arenaSize / 2, -arenaSize / 2, arenaSize, arenaSize); ctx.restore();
         }
       }
       ctx.restore();
@@ -5178,7 +5215,7 @@ function drawWorldTexture(texture, left, right, top, bottom, sceneId) {
       ctx.save();
       ctx.translate(x + arenaSize / 2, y + arenaSize / 2);
       ctx.scale(gx % 2 ? -1 : 1, gy % 2 ? -1 : 1);
-      ctx.drawImage(texture, -arenaSize / 2, -arenaSize / 2, arenaSize, arenaSize);
+      drawImageSafe(texture, -arenaSize / 2, -arenaSize / 2, arenaSize, arenaSize);
       ctx.restore();
     }
   }
@@ -5386,7 +5423,8 @@ function drawCityZombieEnemy(enemy, s, frozen) {
   ctx.rotate(stride * (enemy.type === "runner" ? .075 : .025));
   if (frozen) ctx.filter = "saturate(.45) hue-rotate(145deg) brightness(1.18)";
   if (enemy.flash > 0) ctx.filter = "brightness(2.25) saturate(.22)";
-  ctx.drawImage(cityZombieAtlas, sourceWidth * variant, 0, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height);
+  const spriteRendered = drawImageSafe(cityZombieAtlas, sourceWidth * variant, 0, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height);
+  if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.roundRect(-s * .42, -s * 1.45, s * .84, s * 2.1, s * .3); ctx.fill(); }
   ctx.filter = "none";
   if (enemy.type === "runner") {
     ctx.strokeStyle = "rgba(180,235,220,.46)"; ctx.lineWidth = 2;
@@ -5413,7 +5451,8 @@ function drawAtlasEnemy(enemy, s, frozen) {
   if (grounded) ctx.rotate(stride * (enemy.type === "runner" ? .006 : .003));
   if (frozen) ctx.filter = "saturate(.5) hue-rotate(145deg) brightness(1.2)";
   if (enemy.flash > 0) ctx.filter = "brightness(2.2) saturate(.2)";
-  ctx.drawImage(enemyAtlas, sourceWidth * sceneIndex, 0, sourceWidth, enemyAtlas.naturalHeight, -width / 2, -height * .69, width, height);
+  const spriteRendered = drawImageSafe(enemyAtlas, sourceWidth * sceneIndex, 0, sourceWidth, enemyAtlas.naturalHeight, -width / 2, -height * .69, width, height);
+  if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.arc(0, -s * .28, s * .72, 0, Math.PI * 2); ctx.fill(); }
   ctx.filter = "none";
   if (enemy.type === "splitter") {
     ctx.fillStyle = colorAlpha(enemy.color, .7);
@@ -5449,10 +5488,11 @@ function drawCultivationEnemy(enemy, s, frozen) {
   const aura = ctx.createRadialGradient(0, -s * .25, s * .2, 0, -s * .25, s * 1.45);
   aura.addColorStop(0, colorAlpha(enemy.color, .18)); aura.addColorStop(1, colorAlpha(enemy.color, 0));
   ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, -s * .2, s * 1.45, 0, Math.PI * 2); ctx.fill();
-  if (cultivatorEnemyAtlas.complete && cultivatorEnemyAtlas.naturalWidth) {
+  if (isAssetRenderable(cultivatorEnemyAtlas)) {
     if (frozen) ctx.filter = "saturate(.45) hue-rotate(125deg) brightness(1.15)";
     if (enemy.flash > 0) ctx.filter = "brightness(2.25) saturate(.25)";
-    ctx.drawImage(cultivatorEnemyAtlas, sourceWidth * variant, 0, sourceWidth, cultivatorEnemyAtlas.naturalHeight, -width / 2, -height * .76, width, height);
+    const spriteRendered = drawImageSafe(cultivatorEnemyAtlas, sourceWidth * variant, 0, sourceWidth, cultivatorEnemyAtlas.naturalHeight, -width / 2, -height * .76, width, height);
+    if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.fillRect(-s * .35, -s * 1.4, s * .7, s * 2.1); }
     ctx.filter = "none";
   } else {
     ctx.fillStyle = enemy.color; ctx.fillRect(-s * .35, -s * 1.4, s * .7, s * 2.1);
@@ -6379,18 +6419,18 @@ function drawCultivationAvatar(player, attack, facing) {
   }
   ctx.setLineDash([]);
   const sprite = getHeroSprite("cultivation", player.combatClass.id);
-  if (sprite.complete && sprite.naturalWidth) {
+  let spriteRendered = false;
+  if (isAssetRenderable(sprite)) {
     const baseSway = Math.sin(player.walkPhase) * .035;
     const weaponMotion = player.combatClass.id === "mage" ? -cast * .035 : (-.13 + attackSmooth * .29) * (attackActive ? 1 : 0);
     const thrust = player.combatClass.id === "mage" ? cast * 2 : cast * 5;
     ctx.save();
     ctx.translate(thrust, -cast * 3);
     ctx.rotate(baseSway + weaponMotion);
-    ctx.drawImage(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -46, -89 - cast * 3, 92, 124);
+    spriteRendered = drawImageSafe(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -46, -89 - cast * 3, 92, 124);
     ctx.restore();
-  } else {
-    ctx.fillStyle = player.combatClass.color; ctx.fillRect(-18, -60, 36, 96);
   }
+  if (!spriteRendered) drawFallbackPlayerAvatar(player, Math.hypot(game.move.x, game.move.y) > .05 || movementKeys.size > 0, Math.sin(player.walkPhase), attack, "cultivation");
   const bladeCount = Math.min(12, player.swordCount);
   for (let i = 0; i < bladeCount; i += 1) {
     const angle = ambienceTime * (.72 + visualTier * .018) + i / bladeCount * Math.PI * 2;
@@ -6409,6 +6449,7 @@ function drawCultivationAvatar(player, attack, facing) {
     ctx.restore();
   }
   ctx.restore();
+  return spriteRendered;
 }
 
 function drawCultivatorSwordArm(player, attack, cast) {
@@ -6624,6 +6665,82 @@ function drawOrbitGalaxyDefense(player) {
   ctx.restore();
 }
 
+function drawFallbackPlayerAvatar(player, moving, stride, attack, sceneId = game.scene.id) {
+  const attackPulse = Math.sin(Math.max(0, attack) * Math.PI);
+  const step = moving ? stride : 0;
+  const palette = {
+    city: ["#232d34", "#50616a", "#d8c6a7"],
+    snow: ["#d8f3f6", "#4e91aa", "#f2d0b4"],
+    hospital: ["#e9f8f3", "#32a887", "#e6bea0"],
+    orbit: ["#425a7c", "#8edff2", "#d6b99e"],
+    mars: ["#7f3f2d", "#e59653", "#d6aa8c"],
+    moon: ["#d5d6ea", "#7773ae", "#d8b79c"],
+    cultivation: ["#dce5d8", "#3d7260", "#e2bea0"],
+  }[sceneId] || ["#343f4b", player.combatClass.color, "#deb99c"];
+  ctx.save();
+  ctx.translate(0, -2);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const rearLeg = step >= 0 ? -1 : 1;
+  for (const side of [-1, 1]) {
+    const phase = side * step;
+    ctx.strokeStyle = palette[0];
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(side * 7, 21);
+    ctx.lineTo(side * 9 + phase * 6, 39 - Math.max(0, phase) * 4);
+    ctx.lineTo(side * 12 + phase * 9, 51 - Math.max(0, phase) * 8);
+    ctx.stroke();
+    ctx.strokeStyle = sceneId === "snow" ? "#eaf9fb" : "#151c22";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(side * 12 + phase * 9, 50 - Math.max(0, phase) * 8);
+    ctx.lineTo(side * 18 + phase * 10, 52 - Math.max(0, phase) * 8);
+    ctx.stroke();
+  }
+  ctx.fillStyle = colorAlpha(palette[1], .26);
+  ctx.beginPath();
+  ctx.moveTo(-22, -11); ctx.quadraticCurveTo(-31 - rearLeg * step * 7, 23, -18, 43); ctx.lineTo(0, 31); ctx.lineTo(18, 43); ctx.quadraticCurveTo(31 + rearLeg * step * 7, 23, 22, -11); ctx.closePath(); ctx.fill();
+  const body = ctx.createLinearGradient(-18, -19, 22, 30);
+  body.addColorStop(0, palette[1]); body.addColorStop(1, palette[0]);
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.roundRect(-20, -17, 40, 49, 12); ctx.fill();
+  ctx.strokeStyle = colorAlpha("#ffffff", .38); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-15, 2); ctx.lineTo(15, 2); ctx.moveTo(0, -14); ctx.lineTo(0, 29); ctx.stroke();
+  if (sceneId === "hospital") {
+    ctx.fillStyle = "#37c79b"; ctx.fillRect(8, 8, 4, 14); ctx.fillRect(3, 13, 14, 4);
+  }
+  ctx.fillStyle = palette[2];
+  ctx.beginPath(); ctx.ellipse(0, -35, 14, 17, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = sceneId === "cultivation" ? "#202a27" : "#25262a";
+  ctx.beginPath(); ctx.arc(0, -39, 15, Math.PI, Math.PI * 2); ctx.lineTo(13, -30); ctx.quadraticCurveTo(4, -38, -13, -29); ctx.closePath(); ctx.fill();
+  if (sceneId === "cultivation") { ctx.fillRect(-4, -57, 8, 12); ctx.beginPath(); ctx.ellipse(0, -58, 8, 4, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = "#27231f";
+  ctx.beginPath(); ctx.arc(-5, -35, 1.25, 0, Math.PI * 2); ctx.arc(5, -35, 1.25, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = palette[2]; ctx.lineWidth = 9;
+  const classId = player.combatClass.id;
+  if (classId === "melee") {
+    const swing = -.72 + attackPulse * 1.1;
+    ctx.save(); ctx.translate(14, -3); ctx.rotate(swing);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(18, 9); ctx.stroke();
+    ctx.fillStyle = "#66513c"; ctx.fillRect(13, 5, 17, 7);
+    ctx.fillStyle = "#effaff"; ctx.shadowColor = player.combatClass.color; ctx.shadowBlur = 11;
+    ctx.beginPath(); ctx.moveTo(28, 8); ctx.lineTo(77, 3); ctx.lineTo(83, 8); ctx.lineTo(77, 13); ctx.closePath(); ctx.fill(); ctx.restore();
+    ctx.beginPath(); ctx.moveTo(-13, -4); ctx.lineTo(-22, 15); ctx.stroke();
+  } else if (classId === "ranger") {
+    ctx.beginPath(); ctx.moveTo(-13, -3); ctx.lineTo(13 + attackPulse * 3, 3); ctx.moveTo(12, -4); ctx.lineTo(24 - attackPulse * 4, 4); ctx.stroke();
+    ctx.fillStyle = palette[0]; ctx.shadowColor = player.combatClass.color; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.roundRect(17 - attackPulse * 4, -2, 48, 12, 5); ctx.fill();
+    ctx.fillStyle = player.combatClass.color; ctx.fillRect(54 - attackPulse * 4, 1, 18, 5);
+  } else {
+    ctx.beginPath(); ctx.moveTo(-14, -3); ctx.lineTo(-24, 14); ctx.moveTo(13, -4); ctx.lineTo(29 + attackPulse * 5, -11 - attackPulse * 5); ctx.stroke();
+    const orb = ctx.createRadialGradient(35, -17, 1, 35, -17, 14 + attackPulse * 5);
+    orb.addColorStop(0, "#ffffff"); orb.addColorStop(.35, player.combatClass.color); orb.addColorStop(1, colorAlpha(player.combatClass.color, 0));
+    ctx.fillStyle = orb; ctx.beginPath(); ctx.arc(35, -17, 14 + attackPulse * 5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawBase() {
   const player = game.player;
   const x = player.x;
@@ -6687,18 +6804,19 @@ function drawBase() {
   ctx.scale(1 + attackEase * .045, 1 - attackEase * .035);
   if (game.scene.id !== "orbit") ctx.scale(facing, 1);
   if (game.scene.id === "orbit") {
-    drawOrbitCraft(player, moving, stride, attackEase);
+    game.playerVisualMode = drawOrbitCraft(player, moving, stride, attackEase) ? "sprite" : "procedural";
   } else if (game.scene.id === "cultivation") {
-    drawCultivationAvatar(player, attack, facing);
+    game.playerVisualMode = drawCultivationAvatar(player, attack, facing) ? "sprite" : "fallback";
   } else {
     const activeSprite = getHeroSprite(game.scene.id, player.combatClass.id);
-    if (activeSprite.complete && activeSprite.naturalWidth) {
+    let rendered = false;
+    if (isAssetRenderable(activeSprite)) {
       const width = game.scene.id === "hospital" ? 86 : 78;
       const height = game.scene.id === "hospital" ? 115 : 104;
-      drawAnimatedHeroSprite(activeSprite, 0, activeSprite.naturalWidth, width, height, moving, stride, attack, player.combatClass.id, game.scene.id);
-    } else {
-      ctx.fillStyle = player.combatClass.color; ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill();
+      rendered = drawAnimatedHeroSprite(activeSprite, 0, activeSprite.naturalWidth, width, height, moving, stride, attack, player.combatClass.id, game.scene.id);
     }
+    if (!rendered) drawFallbackPlayerAvatar(player, moving, stride, attack, game.scene.id);
+    game.playerVisualMode = rendered ? "sprite" : "fallback";
   }
   ctx.restore();
 }
@@ -6729,7 +6847,8 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
   const bank = moving ? stride * .035 : Math.sin(ambienceTime * 2) * .012;
   ctx.save();
   const sprite = getHeroSprite("orbit", shipClass);
-  if (sprite.complete && sprite.naturalWidth) {
+  if (isAssetRenderable(sprite)) {
+    ctx.save();
     const width = shipClass === "mage" ? 82 : shipClass === "melee" ? 75 : 68;
     const height = shipClass === "mage" ? 106 : 112;
     ctx.rotate(player.aimAngle + Math.PI / 2 + bank);
@@ -6739,9 +6858,9 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
     engineGlow.addColorStop(0, colorAlpha(player.combatClass.color, .9)); engineGlow.addColorStop(1, colorAlpha(player.combatClass.color, 0));
     ctx.fillStyle = engineGlow; ctx.shadowColor = player.combatClass.color; ctx.shadowBlur = 13;
     for (const engineX of shipClass === "mage" ? [-20, 20] : [-15, 15]) { ctx.beginPath(); ctx.moveTo(engineX - 5, height * .36); ctx.lineTo(engineX, height * .54 + flame); ctx.lineTo(engineX + 5, height * .36); ctx.closePath(); ctx.fill(); }
-    ctx.drawImage(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -width / 2, -height / 2, width, height);
+    const rendered = drawImageSafe(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -width / 2, -height / 2, width, height);
     ctx.restore();
-    return;
+    if (rendered) { ctx.restore(); return true; }
   }
   ctx.rotate(bank);
   ctx.scale(1 - attackEase * .025, 1 + attackEase * .04);
@@ -6769,6 +6888,7 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
   }
   ctx.fillStyle = "#84f5ff"; ctx.shadowBlur = 8; for (const y of [-6, 6]) { ctx.beginPath(); ctx.arc(-29, y, 2.5, 0, Math.PI * 2); ctx.fill(); }
   ctx.restore();
+  return false;
 }
 
 function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, moving, stride, attack, classId, sceneId) {
@@ -6797,18 +6917,19 @@ function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, movi
     if (shieldPush) ctx.scale(1 + attackPulse * .08, 1 - attackPulse * .035);
     else if (classId === "melee") ctx.scale(1 + attackPulse * .035, 1 - attackPulse * .02);
     else if (classId === "ranger") ctx.scale(1 - attackPulse * .025, 1 + attackPulse * .018);
-    ctx.drawImage(atlas, sourceX, 0, sourceWidth, sourceHeight, -width / 2, topY, width, height);
+    const rendered = drawImageSafe(atlas, sourceX, 0, sourceWidth, sourceHeight, -width / 2, topY, width, height);
     ctx.restore();
-    return;
+    return rendered;
   }
 
+  let rendered = true;
   const drawLeg = (side) => {
     const sourceLeft = sourceX + (side < 0 ? 0 : sourceWidth * .5);
     const phase = side < 0 ? step : -step;
     ctx.save();
     ctx.translate(side * phase * 2.2, legLift * (phase > 0 ? -.7 : .28));
     ctx.rotate(side * phase * .045);
-    ctx.drawImage(
+    rendered = drawImageSafe(
       atlas,
       sourceLeft,
       sourceHeight * (split - overlap),
@@ -6818,7 +6939,7 @@ function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, movi
       topY + height * (split - overlap),
       width * .5,
       height * (1 - split + overlap),
-    );
+    ) && rendered;
     ctx.restore();
   };
   drawLeg(-1);
@@ -6828,7 +6949,7 @@ function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, movi
   ctx.translate(upperThrust, upperLift);
   ctx.rotate(bodyLean + weaponSwing + upperRecoil);
   ctx.transform(1, moving ? step * .012 : 0, 0, 1, 0, -Math.abs(step) * 1.5);
-  ctx.drawImage(atlas, sourceX, 0, sourceWidth, sourceHeight * (split + overlap), -width / 2, topY, width, height * (split + overlap));
+  rendered = drawImageSafe(atlas, sourceX, 0, sourceWidth, sourceHeight * (split + overlap), -width / 2, topY, width, height * (split + overlap)) && rendered;
   ctx.restore();
 
   if (moving) {
@@ -6838,6 +6959,7 @@ function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, movi
     ctx.beginPath(); ctx.moveTo(rear * 12, height * .36); ctx.lineTo(rear * (20 + Math.abs(step) * 8), height * .38); ctx.stroke();
   }
   ctx.restore();
+  return rendered;
 }
 
 function drawCultivationHero(x, y) {
@@ -7240,9 +7362,22 @@ function frame(now) {
         : ceiling;
     performanceState.quality += (desiredQuality - performanceState.quality) * .18;
   }
-  if (mode === "playing" && !paused) update(dt);
-  render();
-  requestAnimationFrame(frame);
+  try {
+    if (mode === "playing" && !paused) update(dt);
+    render();
+  } catch (error) {
+    // A single decoded-image or canvas-driver failure must never stop the whole
+    // animation loop. Keep the last good frame, recover critical art, then try
+    // again on the next scheduled frame.
+    renderFailureCount += 1;
+    window.__lastRenderFailure = { message: String(error?.message || error), count: renderFailureCount, at: Date.now() };
+    if (game) {
+      recoverAssetImage(getHeroSprite(game.scene.id, game.player.combatClass.id));
+      recoverAssetImage(game.scene.id === "cultivation" ? cultivatorEnemyAtlas : game.scene.id === "city" ? cityZombieAtlas : enemyAtlas);
+    }
+  } finally {
+    requestAnimationFrame(frame);
+  }
 }
 
 ui.guestLogin.addEventListener("click", () => {
@@ -7527,6 +7662,11 @@ if (QA_MODE) {
         limits: { ...EFFECT_LIMITS },
       },
       combatClass: game.player.combatClass.id,
+      playerVisual: {
+        mode: game.playerVisualMode || "pending",
+        renderFailures: renderFailureCount,
+        assetState: getHeroSprite(game.scene.id, game.player.combatClass.id)?.dataset.assetState || "unknown",
+      },
       branch: game.player.branchFocus,
       derivedStyle: game.player.derivedStyle,
       synergy: game.player.activeSynergy?.synergy || null,
@@ -7556,6 +7696,12 @@ if (QA_MODE) {
       if (game.ultimate?.family === "impact") game.ultimate.time = 1.04;
       else if (game.ultimate?.family === "field") game.ultimate.time = 1.44;
       else if (game.ultimate?.family === "barrage") for (const strike of game.airstrikes) strike.delay = Math.min(strike.delay, .08);
+    },
+    forceHeroFallback: (active = true) => {
+      if (!game) return;
+      const sprite = getHeroSprite(game.scene.id, game.player.combatClass.id);
+      sprite.dataset.qaForceFallback = String(Boolean(active));
+      if (!active) recoverAssetImage(sprite);
     },
   };
 }
