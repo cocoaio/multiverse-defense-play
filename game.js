@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "65";
+const ASSET_REVISION = "66";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -595,6 +595,37 @@ const scenes = [
     palette: ["#67b98c", "#e8d27c", "#698f83", "#a878d0", "#d495bd", "#b7594d"],
   },
 ];
+
+// Enemies do not share a recolored projectile set. Each battlefield has its
+// own silhouette, motion and on-hit language so a player can identify danger
+// from the attack itself, even while the screen is crowded.
+const enemySkillThemes = {
+  city: { rangedStyle: "scrapBolt", casterStyle: "toxicGlob", rangedName: "锈蚀弩钉", casterName: "腐化毒囊", effect: "corrosion", curve: .08 },
+  snow: { rangedStyle: "iceShard", casterStyle: "frostOrb", rangedName: "冰棱投枪", casterName: "极寒霜核", effect: "frost", curve: -.12 },
+  hospital: { rangedStyle: "serumNeedle", casterStyle: "viralOrb", rangedName: "污染针刺", casterName: "病毒孢囊", effect: "contaminate", curve: .17 },
+  orbit: { rangedStyle: "plasmaDart", casterStyle: "voidOrb", rangedName: "等离子矛", casterName: "虚空引力雷", effect: "gravity", curve: .24 },
+  mars: { rangedStyle: "boneSpear", casterStyle: "magmaOrb", rangedName: "赤岩骨矛", casterName: "熔核喷吐", effect: "burn", curve: -.1 },
+  moon: { rangedStyle: "lunarShard", casterStyle: "gravityOrb", rangedName: "月岩裂片", casterName: "静海重力球", effect: "gravity", curve: -.22 },
+  cultivation: { rangedStyle: "flyingSword", casterStyle: "talisman", rangedName: "追魂飞剑", casterName: "镇灵法符", effect: "seal", curve: .14 },
+};
+
+const bossPhaseThemes = {
+  city: ["暴君苏醒", "血肉超载", "毁城狂怒"],
+  snow: ["冰甲凝结", "极寒暴走", "永冻灾厄"],
+  hospital: ["毒株增殖", "病变扩散", "终末感染"],
+  orbit: ["母舰锁定", "虫巢裂变", "星噬坍缩"],
+  mars: ["赤岩战意", "熔核沸腾", "末日喷发"],
+  moon: ["泰坦苏醒", "静海共振", "月陨终局"],
+  cultivation: ["宗主试剑", "道域全开", "万劫归一"],
+};
+
+function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
+  return enemySkillThemes[sceneId] || enemySkillThemes.city;
+}
+
+function getBossPhaseName(phase, sceneId = game?.scene?.id || "city") {
+  return (bossPhaseThemes[sceneId] || bossPhaseThemes.city)[Math.max(0, Math.min(2, phase - 1))];
+}
 
 const cultivationDomains = [
   { name: "宗门外山门", boss: "守山剑魁", accent: "#9be8ba", motif: "gate" },
@@ -2509,6 +2540,8 @@ function spawnEnemy(type, x, y, forcedAngle) {
     attackAngle: 0,
     skillTimer: rand(2.4, 4.5),
     bossSkillIndex: 0,
+    bossPhase: type === "boss" ? 1 : 0,
+    phaseTransition: 0,
     dashTimer: 0,
     slowTimer: 0,
     flash: 0,
@@ -2525,6 +2558,8 @@ function spawnBoss() {
   game.boss = spawnEnemy("boss", game.player.x, game.player.y - (game.scene.endless ? 225 : 420));
   const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
   ui.bossName.textContent = bossName;
+  game.boss.bossPhase = 1;
+  game.boss.phaseTransition = 1.15;
   game.banner = game.boss.divineFinaleGate
     ? { text: "神性装甲 · 极限战力墙", sub: `${bossName}已完成终章进化，永久神器可击穿其核心`, time: 4.2 }
     : { text: "警告 · 首领来袭", sub: `${bossName}正在接近`, time: 3.2 };
@@ -3022,6 +3057,39 @@ function resolveEnemyAttack(enemy) {
   enemy.attackRecovery = enemy.type === "boss" ? .28 : .18;
 }
 
+function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
+  game.bossWarnings.push({
+    x, y, radius, delay, maxDelay: delay, life: 0, sourceId: enemy.id, damage,
+    color: impact.color, impactName: impact.name, scarType: impact.scar,
+    particleShape: impact.particle, sceneId: game.scene.id, bossPhase: phase, detonated: false,
+  });
+}
+
+function activateBossPhase(enemy, phase) {
+  if (enemy.bossPhase >= phase) return;
+  enemy.bossPhase = phase;
+  enemy.phaseTransition = 1.35;
+  enemy.skillTimer = Math.min(enemy.skillTimer, .65);
+  const phaseName = getBossPhaseName(phase);
+  const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
+  ui.bossName.textContent = `${bossName} · ${phaseName}`;
+  game.banner = {
+    text: `阶段 ${phase} · ${phaseName}`,
+    sub: phase === 2 ? "首领技能扩展为双重打击，注意连续落点" : "终焉形态展开三重毁灭区，保持移动",
+    time: 2.5,
+  };
+  game.shake = Math.max(game.shake, preferences.reduceMotion ? 3 : 9 + phase * 2);
+  game.bossShock = Math.max(game.bossShock, preferences.reduceMotion ? .12 : .34 + phase * .05);
+  game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 18, maxRadius: 135 + phase * 24, life: .72, maxLife: .72, color: game.scene.colors.hit, lineWidth: 7 });
+  const reinforcements = phase === 2 ? ["ranged", "caster"] : ["tank", "ranged", "caster"];
+  for (const [index, type] of reinforcements.entries()) {
+    if (game.enemies.length >= PERFORMANCE_PROFILE.enemyCap) break;
+    const angle = index / reinforcements.length * Math.PI * 2 + enemy.sway;
+    spawnEnemy(type, enemy.x + Math.cos(angle) * 96, enemy.y + Math.sin(angle) * 72);
+  }
+  tone(phase === 2 ? 92 : 67, .42, "sawtooth", .055, .58);
+}
+
 function updateEnemies(dt) {
   for (const enemy of game.enemies) {
     if (enemy.dead) continue;
@@ -3029,42 +3097,43 @@ function updateEnemies(dt) {
     enemy.hitKick = Math.max(0, (enemy.hitKick || 0) - dt * 62);
     enemy.rangedFlash = Math.max(0, (enemy.rangedFlash || 0) - dt);
     enemy.attackRecovery = Math.max(0, (enemy.attackRecovery || 0) - dt);
+    enemy.phaseTransition = Math.max(0, (enemy.phaseTransition || 0) - dt);
     enemy.slowTimer = Math.max(0, enemy.slowTimer - dt);
     enemy.skillTimer -= dt;
     enemy.dashTimer = Math.max(0, enemy.dashTimer - dt);
     const playerDx = game.player.x - enemy.x;
     const playerDy = game.player.y - enemy.y;
     const playerDistance = Math.max(1, Math.hypot(playerDx, playerDy));
+    if (enemy.type === "boss") {
+      const healthRatio = Math.max(0, enemy.hp / Math.max(1, enemy.maxHp));
+      const nextPhase = healthRatio <= .32 ? 3 : healthRatio <= .68 ? 2 : 1;
+      if (nextPhase > (enemy.bossPhase || 1)) activateBossPhase(enemy, nextPhase);
+    }
     if (enemy.type === "runner" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 300) {
       enemy.dashTimer = .48;
       enemy.skillTimer = rand(2.8, 4.2);
       game.shockwaves.push({ x: enemy.x, y: enemy.y, radius: 2, maxRadius: 22, life: .25, color: enemy.color });
     }
     if (enemy.type === "boss" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 430) {
-      enemy.skillTimer = rand(4.8, 6.4);
+      const phase = enemy.bossPhase || 1;
+      enemy.skillTimer = phase === 3 ? rand(3.45, 4.2) : phase === 2 ? rand(4, 5.05) : rand(4.8, 6.4);
       enemy.bossSkillIndex = (enemy.bossSkillIndex || 0) + 1;
-      const radius = game.scene.endless ? 118 : game.scene.id === "hospital" ? 104 : 112;
+      const radius = (game.scene.endless ? 118 : game.scene.id === "hospital" ? 104 : 112) + (phase - 1) * 9;
       const lead = Math.min(42, Math.hypot(game.move.x, game.move.y) * 38);
       const impact = getBossImpactSpec();
-      game.bossWarnings.push({
-        x: game.player.x + game.move.x * lead,
-        y: game.player.y + game.move.y * lead,
-        radius,
-        delay: 1.18,
-        maxDelay: 1.18,
-        life: 0,
-        sourceId: enemy.id,
-        damage: Math.max(50, Math.round(enemy.damage * 1.65)),
-        color: impact.color,
-        impactName: impact.name,
-        scarType: impact.scar,
-        particleShape: impact.particle,
-        sceneId: game.scene.id,
-        detonated: false,
-      });
+      const delay = phase === 3 ? .94 : phase === 2 ? 1.05 : 1.18;
+      const damage = Math.max(50, Math.round(enemy.damage * (1.55 + phase * .1)));
+      const targetX = game.player.x + game.move.x * lead;
+      const targetY = game.player.y + game.move.y * lead;
+      const attackAngle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
+      const sideX = -Math.sin(attackAngle);
+      const sideY = Math.cos(attackAngle);
+      queueBossStrike(enemy, targetX, targetY, radius, delay, damage, impact, phase);
+      if (phase >= 2) queueBossStrike(enemy, targetX + sideX * radius * .94, targetY + sideY * radius * .94, radius * .82, delay + .12, damage, impact, phase);
+      if (phase >= 3) queueBossStrike(enemy, targetX - sideX * radius * .94, targetY - sideY * radius * .94, radius * .82, delay + .24, damage, impact, phase);
       if (enemy.bossSkillIndex % 2 === 0) spawnEnemy(Math.random() < .5 ? "ranged" : "caster", enemy.x + rand(-42, 42), enemy.y + rand(-30, 22));
       const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
-      game.banner = { text: `${bossName} · ${impact.name}`, sub: `命中损失 ${Math.max(50, Math.round(enemy.damage * 1.65))} 生命并陷入重创`, time: 1.45 };
+      game.banner = { text: `${bossName} · ${getBossPhaseName(phase)} · ${impact.name}`, sub: `${phase} 重落点 · 命中损失 ${damage} 生命并陷入重创`, time: 1.45 };
     }
     if (enemy.attackWindup > 0) {
       enemy.attackWindup = Math.max(0, enemy.attackWindup - dt);
@@ -3073,7 +3142,7 @@ function updateEnemies(dt) {
     }
     const slow = enemy.slowTimer > 0 ? 0.5 : 1;
     const dash = enemy.dashTimer > 0 ? 2.7 : 1;
-    const rage = enemy.type === "boss" && enemy.hp < enemy.maxHp * .42 ? 1.38 : 1;
+    const rage = enemy.type === "boss" ? (enemy.bossPhase === 3 ? 1.46 : enemy.bossPhase === 2 ? 1.23 : 1) : 1;
     const isRanged = enemy.type === "ranged" || enemy.type === "caster";
     const preferredRange = enemy.type === "caster" ? 238 : 188;
     const attackDistance = enemy.size + 22;
@@ -3119,6 +3188,7 @@ function updateEnemies(dt) {
 function fireEnemyProjectile(enemy, targetX = game.player.x, targetY = game.player.y) {
   const angle = Math.atan2(targetY - enemy.y, targetX - enemy.x);
   const caster = enemy.type === "caster";
+  const theme = getEnemySkillTheme();
   const speed = caster ? 132 : 172;
   const damage = Math.round((caster ? 64 : 55) * (0.9 + game.difficulty * .1) * (.92 + game.director * .08));
   game.enemyProjectiles.push({
@@ -3127,24 +3197,56 @@ function fireEnemyProjectile(enemy, targetX = game.player.x, targetY = game.play
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     angle,
+    age: 0,
     life: 3.4,
     damage,
     radius: caster ? 9 : 5,
-    style: caster ? (game.scene.endless ? "talisman" : "spell") : "arrow",
+    style: caster ? theme.casterStyle : theme.rangedStyle,
+    skillName: caster ? theme.casterName : theme.rangedName,
+    effect: caster ? theme.effect : "impact",
+    curve: caster ? theme.curve : 0,
+    sceneId: game.scene.id,
     color: caster ? game.scene.colors.hit : game.scene.colors.shot,
     dead: false,
   });
   enemy.rangedFlash = .24;
 }
 
+function applyEnemyProjectileEffect(projectile) {
+  const strong = projectile.radius >= 8;
+  if (projectile.effect === "frost") {
+    game.player.staggerTimer = Math.max(game.player.staggerTimer || 0, .3);
+    game.shockwaves.push({ x: projectile.x, y: projectile.y, radius: 4, maxRadius: 38, life: .38, color: "#bdf5ff" });
+  } else if (projectile.effect === "gravity") {
+    game.player.staggerTimer = Math.max(game.player.staggerTimer || 0, .22);
+    game.shockwaves.push({ x: projectile.x, y: projectile.y, radius: 12, maxRadius: 52, life: .44, color: projectile.color, ellipse: .7 });
+  } else if (projectile.effect === "burn") {
+    createTerrainDeformation(projectile.x, projectile.y, 34, { type: "scorch", sceneId: projectile.sceneId, color: "#ff7846", source: "weapon", intensity: .48, life: 12, cinematic: false });
+  } else if (projectile.effect === "seal") {
+    game.shockwaves.push({ x: projectile.x, y: projectile.y, radius: 5, maxRadius: 42, life: .42, color: "#ffe69a", lineWidth: 3 });
+  }
+  makeDirectionalParticles(projectile.x, projectile.y, projectile.color, strong ? 9 : 5, strong ? 105 : 72, projectile.angle + Math.PI, .72, projectile.effect === "contaminate" ? "spore" : "spark");
+}
+
 function updateEnemyProjectiles(dt) {
   for (const projectile of game.enemyProjectiles) {
+    projectile.age = (projectile.age || 0) + dt;
+    if (projectile.curve) {
+      const turn = projectile.curve * Math.sin(projectile.age * 3.2) * dt;
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const nextVx = projectile.vx * cos - projectile.vy * sin;
+      projectile.vy = projectile.vx * sin + projectile.vy * cos;
+      projectile.vx = nextVx;
+      projectile.angle = Math.atan2(projectile.vy, projectile.vx);
+    }
     projectile.x += projectile.vx * dt;
     projectile.y += projectile.vy * dt;
     projectile.life -= dt;
     if (projectile.life <= 0) projectile.dead = true;
     if (projectile.dead || Math.hypot(projectile.x - game.player.x, projectile.y - game.player.y) > 19 + projectile.radius) continue;
     projectile.dead = true;
+    applyEnemyProjectileEffect(projectile);
     damagePlayer(projectile.damage, projectile.x, projectile.y, false);
   }
   game.enemyProjectiles = game.enemyProjectiles.filter((projectile) => !projectile.dead);
@@ -5284,16 +5386,43 @@ function drawBossWarningOverlay(warning) {
 function drawEnemyProjectile(projectile) {
   ctx.save(); ctx.translate(projectile.x, projectile.y); ctx.rotate(projectile.angle);
   ctx.shadowColor = projectile.color; ctx.shadowBlur = 15; ctx.strokeStyle = projectile.color; ctx.fillStyle = projectile.color;
-  if (projectile.style === "arrow") {
+  if (["scrapBolt", "iceShard", "serumNeedle", "plasmaDart", "boneSpear", "lunarShard", "flyingSword"].includes(projectile.style)) {
+    const icy = projectile.style === "iceShard" || projectile.style === "lunarShard";
+    const mechanical = projectile.style === "plasmaDart" || projectile.style === "serumNeedle";
+    const sword = projectile.style === "flyingSword";
     ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-24, 0); ctx.lineTo(16, 0); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(23, 0); ctx.lineTo(11, -7); ctx.lineTo(11, 7); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = sword ? "#edf5ff" : projectile.color;
+    ctx.beginPath(); ctx.moveTo(sword ? 27 : 23, 0); ctx.lineTo(icy ? 7 : 11, -7); ctx.lineTo(icy ? 13 : 11, 0); ctx.lineTo(icy ? 7 : 11, 7); ctx.closePath(); ctx.fill();
+    if (mechanical) { ctx.fillStyle = "#ffffff"; ctx.fillRect(-5, -2, 15, 4); }
+    if (projectile.style === "boneSpear") { ctx.strokeStyle = "#ffcf91"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-12, -4); ctx.lineTo(-4, 4); ctx.moveTo(-4, -4); ctx.lineTo(4, 4); ctx.stroke(); }
     ctx.strokeStyle = colorAlpha("#ffffff", .84); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-21, 0); ctx.lineTo(-29, -7); ctx.moveTo(-21, 0); ctx.lineTo(-29, 7); ctx.stroke();
   } else if (projectile.style === "talisman") {
     ctx.fillStyle = "#f0d391"; ctx.fillRect(-10, -5, 20, 10); ctx.fillStyle = "#b43c38";
     ctx.fillRect(-5, -3, 2, 6); ctx.fillRect(0, -4, 2, 8); ctx.fillRect(5, -2, 2, 5);
   } else {
-    ctx.strokeStyle = colorAlpha(projectile.color, .9); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(12, 0); ctx.stroke();
-    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(15, 0); ctx.stroke();
+    const phase = ambienceTime * (projectile.style === "voidOrb" || projectile.style === "gravityOrb" ? -5 : 7) + (projectile.age || 0) * 4;
+    const radius = projectile.style === "viralOrb" ? 11 : projectile.style === "magmaOrb" ? 12 : 10;
+    ctx.rotate(-projectile.angle);
+    if (projectile.style === "toxicGlob" || projectile.style === "viralOrb") {
+      ctx.fillStyle = colorAlpha(projectile.color, .28); ctx.beginPath(); ctx.arc(0, 0, radius + 7, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 5; i += 1) { const a = phase + i * 1.256; ctx.fillStyle = i % 2 ? "#efff9b" : projectile.color; ctx.beginPath(); ctx.arc(Math.cos(a) * radius, Math.sin(a) * radius, 3, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = "#244d2d"; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+    } else if (projectile.style === "frostOrb") {
+      ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 3;
+      for (let i = 0; i < 6; i += 1) { ctx.save(); ctx.rotate(phase + i * Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -15); ctx.moveTo(0, -9); ctx.lineTo(-4, -12); ctx.moveTo(0, -9); ctx.lineTo(4, -12); ctx.stroke(); ctx.restore(); }
+      ctx.fillStyle = projectile.color; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (projectile.style === "voidOrb" || projectile.style === "gravityOrb") {
+      const gradient = ctx.createRadialGradient(-3, -3, 1, 0, 0, 15); gradient.addColorStop(0, "#ffffff"); gradient.addColorStop(.28, projectile.color); gradient.addColorStop(.72, "#24163f"); gradient.addColorStop(1, "rgba(2,2,10,0)");
+      ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = colorAlpha(projectile.color, .9); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, 21, 7, phase, 0, Math.PI * 2); ctx.stroke();
+    } else if (projectile.style === "magmaOrb") {
+      ctx.fillStyle = "#ff4c24"; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#ffd26b"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 8, phase, phase + 4.3); ctx.stroke();
+      ctx.fillStyle = colorAlpha("#ff7a3f", .35); ctx.beginPath(); ctx.arc(0, 0, 19, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.strokeStyle = colorAlpha(projectile.color, .9); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(12, 0); ctx.stroke();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(15, 0); ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -5738,6 +5867,33 @@ function drawEnemyAttackCue(enemy, s) {
   ctx.restore();
 }
 
+function drawBossPhaseAura(enemy, s) {
+  if (enemy.type !== "boss") return;
+  const phase = enemy.bossPhase || 1;
+  const transition = Math.min(1, (enemy.phaseTransition || 0) / 1.35);
+  const color = phase === 3 ? "#ff4d6d" : phase === 2 ? game.scene.colors.hit : game.scene.colors.shot;
+  ctx.save();
+  ctx.translate(enemy.x, enemy.y);
+  ctx.globalCompositeOperation = allowExpensiveGlow() ? "lighter" : "source-over";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = allowExpensiveGlow() ? 12 + phase * 4 : 0;
+  for (let ring = 0; ring < phase; ring += 1) {
+    const radius = s * (1.08 + ring * .2) + transition * (32 + ring * 10);
+    ctx.strokeStyle = colorAlpha(ring === phase - 1 ? "#ffffff" : color, .28 + phase * .09 + transition * .32);
+    ctx.lineWidth = Math.max(1.5, 4.5 - ring);
+    ctx.setLineDash(ring % 2 ? [8, 7] : [18, 9]);
+    ctx.lineDashOffset = (ring % 2 ? 1 : -1) * ambienceTime * (22 + phase * 8);
+    ctx.beginPath(); ctx.ellipse(0, s * .38, radius, radius * .34, ring * .18, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(7,5,10,.88)"; ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(-38, -s * 1.78, 76, 21, 8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.font = "900 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(`P${phase} · ${getBossPhaseName(phase)}`, 0, -s * 1.78 + 10.5);
+  ctx.restore();
+}
+
 function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
@@ -5774,6 +5930,7 @@ function drawEnemy(enemy) {
     ctx.beginPath(); ctx.arc(0, 0, s * 1.16, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
+  drawBossPhaseAura(enemy, s);
   drawEnemyAttackCue(enemy, s);
 
   if ((enemy.type === "tank" || enemy.type === "boss") && enemy.hp < enemy.maxHp) {
@@ -8088,6 +8245,18 @@ if (QA_MODE) {
         active: game.bossWarnings.length,
         overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
+      },
+      bossPhase: game.boss ? {
+        phase: game.boss.bossPhase || 1,
+        name: getBossPhaseName(game.boss.bossPhase || 1),
+        transition: Number((game.boss.phaseTransition || 0).toFixed(2)),
+        strikeCount: game.bossWarnings.filter((warning) => warning.sourceId === game.boss.id).length,
+      } : null,
+      enemySkills: {
+        theme: game.scene.id,
+        ranged: getEnemySkillTheme().rangedName,
+        caster: getEnemySkillTheme().casterName,
+        projectiles: game.enemyProjectiles.map((projectile) => ({ style: projectile.style, effect: projectile.effect, sceneId: projectile.sceneId })),
       },
       enemyTelegraphs: {
         active: game.enemies.filter((enemy) => enemy.attackWindup > 0).length,
