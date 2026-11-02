@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "75";
+const ASSET_REVISION = "76";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -821,6 +821,41 @@ const sceneCombatModels = {
     mage: { weapon: "星罗法印", attack: "两仪法箓", ultimate: "九霄雷劫", icon: "法" },
   },
 };
+
+const evolutionSignatureProfiles = {
+  city: {
+    melee: { id: "powerSaw", name: "动力锯齿斩", color: "#ffad55" },
+    mage: { id: "teslaCrown", name: "特斯拉雷冠", color: "#cda6ff" },
+  },
+  snow: {
+    melee: { id: "glacierFracture", name: "冰川碎岳", color: "#dffbff" },
+    mage: { id: "zeroMandala", name: "绝对零度雪轮", color: "#a9eaff" },
+  },
+  hospital: {
+    melee: { id: "sterileBreach", name: "无菌隔离冲击", color: "#83ffda" },
+    mage: { id: "lysisCross", name: "裂解十字域", color: "#72ffd0" },
+  },
+  orbit: {
+    melee: { id: "orbitalTide", name: "群星潮汐环", color: "#82dcff" },
+    mage: { id: "swarmGate", name: "蜂群跃迁门", color: "#bda0ff" },
+  },
+  mars: {
+    melee: { id: "magmaRift", name: "熔核断层斩", color: "#ff9d69" },
+    mage: { id: "coronaBloom", name: "日冕等离子花", color: "#ff8fc7" },
+  },
+  moon: {
+    melee: { id: "gravityTide", name: "月震引力潮", color: "#e9e8ff" },
+    mage: { id: "lensCollapse", name: "静海透镜坍缩", color: "#c4b7ff" },
+  },
+  cultivation: {
+    melee: { id: "swordDomain", name: "镇岳剑域", color: "#ffd27a" },
+    mage: { id: "starSeal", name: "星罗两仪法印", color: "#d5b4ff" },
+  },
+};
+
+function getEvolutionSignatureProfile(sceneId = game?.scene?.id, classId = game?.player?.combatClass?.id) {
+  return evolutionSignatureProfiles[sceneId]?.[classId] || null;
+}
 
 function getSceneCombatModel(sceneId, classId) {
   return sceneCombatModels[sceneId]?.[classId] || sceneCombatModels.city.ranger;
@@ -1898,6 +1933,7 @@ function makeGame(runType = "main") {
     lastUpgradeFeedback: null,
     projectileEvolutionRendered: 0,
     evolutionImpactRendered: 0,
+    evolutionSignatureRenders: { attack: null, impact: null, projectile: null },
     lastEvolutionScarAt: -99,
     combo: 0,
     comboTimer: 0,
@@ -3008,6 +3044,7 @@ function shoot() {
   const assassin = player.derivedStyle === "assassin" && combatClass.id === "ranger";
   const ritualSwarm = player.derivedStyle === "ritualSwarm" && combatClass.id === "mage";
   const evolution = getProjectileEvolutionState(player);
+  const evolutionSignature = getEvolutionSignatureProfile(game.scene.id, combatClass.id);
   const attackId = nextId++;
   const identityPierce = { icicle: 1, laser: 2, rail: 3, flyingSword: 2, spell: 1 }[combatClass.fx] || 0;
   for (let i = 0; i < count; i += 1) {
@@ -3035,6 +3072,8 @@ function shoot() {
       evolutionLabel: evolution.label,
       evolutionColor: evolution.color,
       evolutionPrimary: i === Math.floor(count / 2),
+      evolutionSignature: evolutionSignature?.id || null,
+      evolutionSignatureName: evolutionSignature?.name || null,
       trail: [],
       age: 0,
       hits: new Set(),
@@ -4015,6 +4054,8 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
     evolutionTier: bullet.evolutionTier || 0,
     evolutionColor: bullet.evolutionColor || bullet.color,
     evolutionPrimary: bullet.evolutionPrimary !== false,
+    evolutionSignature: bullet.evolutionSignature || null,
+    evolutionSignatureName: bullet.evolutionSignatureName || null,
   });
   const evolutionTier = bullet.evolutionTier || 0;
   if (!lightweight && evolutionTier >= 3 && game.elapsed - game.lastEvolutionScarAt >= (LOW_POWER_DEVICE ? 2.4 : 1.45)) {
@@ -7479,9 +7520,40 @@ function drawProjectileEvolutionCoating(bullet) {
     }
   }
   if (tier >= 3 && !LOW_POWER_DEVICE) {
-    ctx.rotate(Math.PI / 4 + (bullet.age || 0) * 2.6);
-    ctx.strokeStyle = colorAlpha("#ffffff", .72);
-    ctx.strokeRect(-radius * .58, -radius * .58, radius * 1.16, radius * 1.16);
+    if (bullet.evolutionSignature) drawEvolutionProjectileGlyph(bullet, radius);
+    else {
+      ctx.rotate(Math.PI / 4 + (bullet.age || 0) * 2.6);
+      ctx.strokeStyle = colorAlpha("#ffffff", .72);
+      ctx.strokeRect(-radius * .58, -radius * .58, radius * 1.16, radius * 1.16);
+    }
+  }
+  ctx.restore();
+}
+
+function drawEvolutionProjectileGlyph(bullet, radius) {
+  const signature = bullet.evolutionSignature;
+  const color = bullet.evolutionColor || bullet.color;
+  game.evolutionSignatureRenders.projectile = signature;
+  ctx.save();
+  ctx.strokeStyle = colorAlpha("#ffffff", .78); ctx.fillStyle = colorAlpha(color, .85); ctx.lineWidth = 1.4;
+  const spin = (bullet.age || 0) * 3.4;
+  if (signature === "teslaCrown") {
+    ctx.beginPath(); ctx.moveTo(-radius, radius * .55); ctx.lineTo(-radius * .3, -radius * .65); ctx.lineTo(radius * .2, radius * .28); ctx.lineTo(radius, -radius * .5); ctx.stroke();
+  } else if (signature === "zeroMandala") {
+    ctx.rotate(spin);
+    for (let arm = 0; arm < 6; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius, 0); ctx.moveTo(radius * .55, 0); ctx.lineTo(radius * .78, -radius * .25); ctx.moveTo(radius * .55, 0); ctx.lineTo(radius * .78, radius * .25); ctx.stroke(); }
+  } else if (signature === "lysisCross") {
+    ctx.fillRect(-radius * .22, -radius, radius * .44, radius * 2); ctx.fillRect(-radius, -radius * .22, radius * 2, radius * .44);
+  } else if (signature === "swarmGate") {
+    ctx.rotate(spin); for (let node = 0; node < 3; node += 1) { ctx.rotate(Math.PI * 2 / 3); ctx.beginPath(); ctx.moveTo(radius, 0); ctx.lineTo(radius * .55, -radius * .24); ctx.lineTo(radius * .55, radius * .24); ctx.closePath(); ctx.fill(); }
+  } else if (signature === "coronaBloom") {
+    ctx.rotate(spin); for (let ray = 0; ray < 8; ray += 1) { ctx.rotate(Math.PI / 4); ctx.fillRect(radius * .38, -1, radius * .78, 2); }
+  } else if (signature === "lensCollapse") {
+    ctx.rotate(spin); ctx.beginPath(); ctx.ellipse(0, 0, radius * 1.22, radius * .38, 0, 0, Math.PI * 2); ctx.stroke(); ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.ellipse(0, 0, radius * 1.22, radius * .38, 0, 0, Math.PI * 2); ctx.stroke();
+  } else if (signature === "starSeal") {
+    ctx.rotate(spin); ctx.beginPath(); for (let point = 0; point <= 6; point += 1) { const angle = point * Math.PI * 4 / 6 - Math.PI / 2; if (!point) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke();
+  } else {
+    ctx.rotate(Math.PI / 4 + spin); ctx.strokeRect(-radius * .58, -radius * .58, radius * 1.16, radius * 1.16);
   }
   ctx.restore();
 }
@@ -7637,10 +7709,45 @@ function drawEvolutionImpactSignature(burst, progress, alpha) {
     }
   }
   if (tier >= 3 && !LOW_POWER_DEVICE) {
-    ctx.rotate(Math.PI / 4 + progress * 2.2);
-    ctx.strokeStyle = colorAlpha("#ffffff", .74);
-    const sigil = 15 + progress * 22;
-    ctx.strokeRect(-sigil, -sigil, sigil * 2, sigil * 2);
+    if (burst.evolutionSignature) drawThemedEvolutionImpactGlyph(burst, progress, color);
+    else {
+      ctx.rotate(Math.PI / 4 + progress * 2.2);
+      ctx.strokeStyle = colorAlpha("#ffffff", .74);
+      const sigil = 15 + progress * 22;
+      ctx.strokeRect(-sigil, -sigil, sigil * 2, sigil * 2);
+    }
+  }
+  ctx.restore();
+}
+
+function drawThemedEvolutionImpactGlyph(burst, progress, color) {
+  const id = burst.evolutionSignature;
+  const radius = 15 + progress * 24;
+  game.evolutionSignatureRenders.impact = id;
+  ctx.save(); ctx.strokeStyle = colorAlpha("#ffffff", .76); ctx.fillStyle = colorAlpha(color, .62); ctx.lineWidth = 1.5;
+  if (id === "powerSaw") {
+    ctx.setLineDash([5, 3]); for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.arc(0, 0, radius + ring * 6, -.92, .92); ctx.stroke(); } ctx.setLineDash([]);
+  } else if (id === "glacierFracture") {
+    for (let shard = 0; shard < 7; shard += 1) { ctx.save(); ctx.rotate(shard / 7 * Math.PI * 2); ctx.translate(radius, 0); ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -3); ctx.lineTo(-3, 5); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (id === "sterileBreach" || id === "lysisCross") {
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke(); ctx.fillRect(-radius * .12, -radius * .7, radius * .24, radius * 1.4); ctx.fillRect(-radius * .7, -radius * .12, radius * 1.4, radius * .24);
+  } else if (["orbitalTide", "gravityTide", "lensCollapse"].includes(id)) {
+    for (let ring = 0; ring < 3; ring += 1) { ctx.save(); ctx.rotate(progress * (ring % 2 ? -2 : 2) + ring * Math.PI / 3); ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 7, radius * (.24 + ring * .05), 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+  } else if (id === "magmaRift") {
+    for (const offset of [-.45, 0, .45]) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius * .5, offset * radius); ctx.lineTo(radius, offset * radius * .35); ctx.lineTo(radius * 1.4, offset * radius * .76); ctx.stroke(); }
+  } else if (id === "swordDomain") {
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(-4, 0, radius * 1.15, -.92, .92); ctx.stroke(); ctx.lineWidth = 1.3; for (const y of [-9, 0, 9]) { ctx.beginPath(); ctx.moveTo(radius * .1, y); ctx.lineTo(radius * 1.35, y * 1.6); ctx.stroke(); }
+  } else if (id === "teslaCrown") {
+    for (const offset of [-10, 0, 10]) { ctx.beginPath(); ctx.moveTo(-radius, offset); ctx.lineTo(-radius * .3, offset - 8); ctx.lineTo(radius * .15, offset + 5); ctx.lineTo(radius, offset - 4); ctx.stroke(); }
+  } else if (id === "zeroMandala") {
+    ctx.rotate(progress * 3); for (let arm = 0; arm < 6; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius, 0); ctx.moveTo(radius * .55, 0); ctx.lineTo(radius * .78, -radius * .22); ctx.moveTo(radius * .55, 0); ctx.lineTo(radius * .78, radius * .22); ctx.stroke(); }
+  } else if (id === "swarmGate") {
+    ctx.rotate(progress * 3); ctx.beginPath(); for (let side = 0; side <= 6; side += 1) { const angle = side / 6 * Math.PI * 2; if (!side) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke();
+    for (let node = 0; node < 3; node += 1) { ctx.rotate(Math.PI * 2 / 3); ctx.fillRect(radius * .75, -2, radius * .45, 4); }
+  } else if (id === "coronaBloom") {
+    ctx.rotate(progress * 3); for (let ray = 0; ray < 10; ray += 1) { ctx.rotate(Math.PI / 5); ctx.fillRect(radius * .35, -1.5, radius, 3); } ctx.beginPath(); ctx.arc(0, 0, radius * .42, 0, Math.PI * 2); ctx.stroke();
+  } else if (id === "starSeal") {
+    ctx.rotate(progress * 2); ctx.beginPath(); for (let point = 0; point <= 6; point += 1) { const angle = point * Math.PI * 4 / 6 - Math.PI / 2; if (!point) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, radius * .42, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
 }
@@ -8036,7 +8143,61 @@ function drawClassAttackAnimation(player, attack) {
     ctx.fillStyle = "#e8ffff";
     for (let i = 0; i < 5; i += 1) { ctx.beginPath(); ctx.arc(44 + i * 8 + Math.sin(i * 9) * 3, Math.sin(i * 4.3) * 8, 1.7 + i * .18, 0, Math.PI * 2); ctx.fill(); }
   }
+  drawEvolvedClassAttackSignature(player, eased);
   drawAttackTimingAccent(player, eased);
+  ctx.restore();
+}
+
+function drawEvolvedClassAttackSignature(player, eased) {
+  const evolution = getProjectileEvolutionState(player);
+  const profile = getEvolutionSignatureProfile(game.scene.id, player.combatClass.id);
+  if (!profile || evolution.tier <= 0) return;
+  game.evolutionSignatureRenders.attack = profile.id;
+  const tier = evolution.tier;
+  const strength = .34 + tier * .18;
+  const radius = (player.combatClass.id === "melee" ? 60 : 25) + tier * 7 + eased * 11;
+  const originX = player.combatClass.id === "melee" ? 8 : 54 + eased * 8;
+  ctx.save(); ctx.translate(originX, 0);
+  ctx.globalCompositeOperation = game.performance.quality > .58 ? "lighter" : "source-over";
+  ctx.globalAlpha = Math.min(1, strength + eased * .22);
+  ctx.strokeStyle = profile.color; ctx.fillStyle = colorAlpha(profile.color, .78); ctx.lineWidth = 1.4 + tier * .65;
+  const spin = ambienceTime * (profile.id === "swarmGate" ? 4.2 : 1.8);
+
+  if (profile.id === "powerSaw") {
+    for (let ring = 0; ring < Math.min(3, tier); ring += 1) { ctx.setLineDash([7 + ring * 2, 4]); ctx.beginPath(); ctx.arc(0, 0, radius + ring * 8, -.95, .86); ctx.stroke(); } ctx.setLineDash([]);
+  } else if (profile.id === "glacierFracture") {
+    const shards = LOW_POWER_DEVICE ? 4 : 5 + tier;
+    for (let index = 0; index < shards; index += 1) { const angle = -.86 + index / Math.max(1, shards - 1) * 1.72; ctx.save(); ctx.rotate(angle); ctx.translate(radius, 0); ctx.beginPath(); ctx.moveTo(11 + tier * 2, 0); ctx.lineTo(-6, -4); ctx.lineTo(-3, 6); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (profile.id === "sterileBreach") {
+    ctx.beginPath(); for (let side = 0; side <= 6; side += 1) { const angle = side / 6 * Math.PI * 2; if (!side) ctx.moveTo(Math.cos(angle) * radius * .72, Math.sin(angle) * radius * .72); else ctx.lineTo(Math.cos(angle) * radius * .72, Math.sin(angle) * radius * .72); } ctx.stroke();
+    ctx.fillRect(radius * .05, -radius * .36, radius * .16, radius * .72); ctx.fillRect(-radius * .21, -radius * .1, radius * .68, radius * .2);
+  } else if (profile.id === "orbitalTide") {
+    for (let ring = 0; ring < Math.min(3, tier); ring += 1) { ctx.save(); ctx.rotate(spin + ring * 1.04); ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 9, radius * (.28 + ring * .06), 0, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = ring % 2 ? "#ffffff" : profile.color; ctx.beginPath(); ctx.arc(radius + ring * 9, 0, 3 + ring, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+  } else if (profile.id === "magmaRift") {
+    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(radius * 1.2, -radius * .6); ctx.lineTo(radius * .74, 0); ctx.lineTo(radius * 1.2, radius * .6); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#ffe19a"; for (const offset of [-.34, 0, .34]) { ctx.beginPath(); ctx.moveTo(radius * .28, offset * radius); ctx.lineTo(radius * .58, offset * radius * .35); ctx.lineTo(radius * .92, offset * radius * .7); ctx.stroke(); }
+  } else if (profile.id === "gravityTide") {
+    for (let ring = 0; ring < Math.min(3, tier); ring += 1) { ctx.save(); ctx.rotate(spin * (ring % 2 ? -1 : 1) + ring * .8); ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 9, radius * (.22 + ring * .05), 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+  } else if (profile.id === "swordDomain") {
+    ctx.lineWidth = 4 + tier; ctx.beginPath(); ctx.arc(0, 0, radius, -.98, .84); ctx.stroke(); ctx.strokeStyle = "#fff6c8"; ctx.lineWidth = 1.4;
+    for (let blade = 0; blade < Math.min(5, 2 + tier); blade += 1) { const y = (blade - (1 + tier) / 2) * 9; ctx.beginPath(); ctx.moveTo(radius * .28, y); ctx.lineTo(radius * 1.18, y * 1.65); ctx.stroke(); }
+  } else if (profile.id === "teslaCrown") {
+    const branches = LOW_POWER_DEVICE ? 3 : 3 + tier;
+    for (let branch = 0; branch < branches; branch += 1) { const y = (branch - (branches - 1) / 2) * 8; ctx.beginPath(); ctx.moveTo(-radius * .45, y); ctx.lineTo(-radius * .08, y - 7); ctx.lineTo(radius * .18, y + 5); ctx.lineTo(radius * .72, y - 4); ctx.stroke(); }
+  } else if (profile.id === "zeroMandala") {
+    ctx.rotate(spin); for (let arm = 0; arm < 6; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(radius, 0); ctx.moveTo(radius * .58, 0); ctx.lineTo(radius * .8, -radius * .2); ctx.moveTo(radius * .58, 0); ctx.lineTo(radius * .8, radius * .2); ctx.stroke(); }
+  } else if (profile.id === "lysisCross") {
+    ctx.rotate(spin * .35); ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke(); ctx.fillRect(-radius * .13, -radius * .72, radius * .26, radius * 1.44); ctx.fillRect(-radius * .72, -radius * .13, radius * 1.44, radius * .26);
+  } else if (profile.id === "swarmGate") {
+    ctx.rotate(spin); ctx.beginPath(); for (let side = 0; side <= 6; side += 1) { const angle = side / 6 * Math.PI * 2; if (!side) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke();
+    const nodes = LOW_POWER_DEVICE ? 3 : 3 + tier; for (let node = 0; node < nodes; node += 1) { const angle = node / nodes * Math.PI * 2; ctx.save(); ctx.translate(Math.cos(angle) * radius, Math.sin(angle) * radius); ctx.rotate(angle); ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -3); ctx.lineTo(-2, 0); ctx.lineTo(-5, 3); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (profile.id === "coronaBloom") {
+    ctx.rotate(spin); ctx.beginPath(); ctx.arc(0, 0, radius * .38, 0, Math.PI * 2); ctx.stroke(); const rays = LOW_POWER_DEVICE ? 6 : 6 + tier * 2; for (let ray = 0; ray < rays; ray += 1) { ctx.rotate(Math.PI * 2 / rays); ctx.fillRect(radius * .42, -1.5, radius * .62, 3); }
+  } else if (profile.id === "lensCollapse") {
+    for (let ring = 0; ring < Math.min(3, tier); ring += 1) { ctx.save(); ctx.rotate(spin * (ring % 2 ? -1 : 1) + ring * Math.PI / 3); ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 5, radius * .3, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+  } else if (profile.id === "starSeal") {
+    ctx.rotate(spin * .45); ctx.beginPath(); for (let point = 0; point <= 6; point += 1) { const angle = point * Math.PI * 4 / 6 - Math.PI / 2; if (!point) ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); } ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, radius * .48, 0, Math.PI * 2); ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -9585,6 +9746,8 @@ if (QA_MODE) {
       combatClass: game.player.combatClass.id,
       projectileEvolution: {
         ...getProjectileEvolutionState(game.player),
+        signature: getEvolutionSignatureProfile(game.scene.id, game.player.combatClass.id),
+        signatureRenders: { ...game.evolutionSignatureRenders },
         projectileRenderedTier: game.projectileEvolutionRendered || 0,
         impactRenderedTier: game.evolutionImpactRendered || 0,
         activeBulletTiers: [...new Set(game.bullets.map((bullet) => bullet.evolutionTier || 0))].sort(),
