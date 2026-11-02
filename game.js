@@ -279,12 +279,19 @@ const ui = {
   result: $("#resultScreen"),
   pauseOverlay: $("#pauseOverlay"),
   pauseResume: $("#pauseResumeButton"),
+  pauseSettings: $("#pauseSettingsButton"),
   pauseExit: $("#pauseExitButton"),
   start: $("#startButton"),
   retry: $("#retryButton"),
   homeButton: $("#homeButton"),
   pause: $("#pauseButton"),
   mute: $("#muteButton"),
+  settingsButton: $("#settingsButton"),
+  settingsModal: $("#settingsModal"),
+  settingsProfile: $("#settingsProfileText"),
+  qualityChoices: $("#qualityChoices"),
+  privacyLink: $("#privacyLink"),
+  privacyDetails: $("#privacyDetails"),
   adminBadge: $("#adminBadge"),
   commanderRole: $("#commanderRoleText"),
   energyButton: $("#energyButton"),
@@ -417,12 +424,43 @@ const LEVELS_PER_SCENE = 12;
 const QA_MODE = new URLSearchParams(location.search).get("qa") === "internal";
 const ADMIN_MODE = new URLSearchParams(location.search).get("admin") === "owner";
 const STORAGE_KEY = ADMIN_MODE ? "multiverse-defense-admin-v1" : "multiverse-defense-save-v5";
+const PREFERENCES_KEY = "multiverse-defense-preferences-v1";
+const defaultPreferences = { quality: "auto", sfx: true, haptics: true, damageNumbers: true, reduceMotion: false };
+function loadPreferences() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "null");
+    return { ...defaultPreferences, ...(stored && typeof stored === "object" ? stored : {}) };
+  } catch (error) {
+    return { ...defaultPreferences };
+  }
+}
+let preferences = loadPreferences();
+function savePreferences() {
+  try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch (error) { /* Settings still apply for this session. */ }
+}
 const BASE_Y = 752;
-const PERFORMANCE_PROFILE = LOW_POWER_DEVICE
-  ? { name: "省电", qualityCeiling: .56, qualityFloor: .38, enemyCap: 34, targetFps: 30, trailLength: 3 }
-  : MOBILE_DEVICE
-    ? { name: "流畅", qualityCeiling: .76, qualityFloor: .5, enemyCap: 44, targetFps: 60, trailLength: 6 }
-    : { name: "标准", qualityCeiling: 1, qualityFloor: .58, enemyCap: 84, targetFps: 60, trailLength: 14 };
+function getPerformanceProfile() {
+  if (preferences.quality === "smooth") {
+    return LOW_POWER_DEVICE
+      ? { name: "流畅优先 · 30 FPS", qualityCeiling: .5, qualityFloor: .34, enemyCap: 30, targetFps: 30, trailLength: 2 }
+      : MOBILE_DEVICE
+        ? { name: "流畅优先 · 60 FPS", qualityCeiling: .66, qualityFloor: .44, enemyCap: 38, targetFps: 60, trailLength: 4 }
+        : { name: "流畅优先 · 60 FPS", qualityCeiling: .76, qualityFloor: .5, enemyCap: 62, targetFps: 60, trailLength: 7 };
+  }
+  if (preferences.quality === "quality") {
+    return LOW_POWER_DEVICE
+      ? { name: "精美模式 · 30 FPS", qualityCeiling: .72, qualityFloor: .46, enemyCap: 42, targetFps: 30, trailLength: 5 }
+      : MOBILE_DEVICE
+        ? { name: "精美模式 · 60 FPS", qualityCeiling: .9, qualityFloor: .56, enemyCap: 58, targetFps: 60, trailLength: 9 }
+        : { name: "精美模式 · 60 FPS", qualityCeiling: 1, qualityFloor: .62, enemyCap: 84, targetFps: 60, trailLength: 14 };
+  }
+  return LOW_POWER_DEVICE
+    ? { name: "自动适配 · 省电", qualityCeiling: .56, qualityFloor: .38, enemyCap: 34, targetFps: 30, trailLength: 3 }
+    : MOBILE_DEVICE
+      ? { name: "自动适配 · 流畅", qualityCeiling: .76, qualityFloor: .5, enemyCap: 44, targetFps: 60, trailLength: 6 }
+      : { name: "自动适配 · 标准", qualityCeiling: 1, qualityFloor: .58, enemyCap: 84, targetFps: 60, trailLength: 14 };
+}
+let PERFORMANCE_PROFILE = getPerformanceProfile();
 const EFFECT_LIMITS = LOW_POWER_DEVICE
   ? { particles: 96, floaters: 24, bursts: 22, shockwaves: 18, corpses: 22, xpDrops: 56, medkits: 12, bullets: 82 }
   : MOBILE_DEVICE
@@ -721,7 +759,7 @@ let game = null;
 let mode = QA_MODE || ADMIN_MODE ? "home" : "login";
 let paused = false;
 let manuallyPaused = false;
-let muted = false;
+let muted = !preferences.sfx;
 let lastFrame = performance.now();
 let nextFrameAt = lastFrame;
 let ambienceTime = 0;
@@ -2780,7 +2818,7 @@ function updateBossWarnings(dt) {
       game.shake = Math.max(game.shake, 19);
       game.bossShock = .78;
       game.flash = Math.max(game.flash, .32);
-      if (navigator.vibrate) navigator.vibrate([55, 25, 95]);
+      vibrateFeedback([55, 25, 95]);
       tone(62, .2, "sawtooth", .06, .38);
     } else warning.life -= dt;
   }
@@ -2795,7 +2833,7 @@ function damagePlayer(rawDamage, sourceX, sourceY, heavy = false) {
   if (heavy) game.player.staggerTimer = Math.max(game.player.staggerTimer || 0, .62);
   game.shake = Math.max(game.shake, heavy ? 11 : 4);
   game.flash = heavy ? .23 : .15;
-  addFloater(game.player.x, game.player.y - 34, `-${damage}`, "#ff7169", heavy ? 17 : 14);
+  if (preferences.damageNumbers) addFloater(game.player.x, game.player.y - 34, `-${damage}`, "#ff7169", heavy ? 17 : 14);
   const angle = Math.atan2(game.player.y - sourceY, game.player.x - sourceX);
   makeDirectionalParticles(game.player.x, game.player.y, "#ff7a68", heavy ? 11 : 5, heavy ? 130 : 75, angle, .85, "spark");
   tone(heavy ? 82 : 105, heavy ? .09 : .055, "sawtooth", heavy ? .03 : .02, .65);
@@ -2864,12 +2902,12 @@ function damageEnemy(enemy, amount, critical = false, secondary = false) {
     const absorbed = Math.min(enemy.shield, amount);
     enemy.shield -= absorbed;
     amount -= absorbed;
-    addFloater(enemy.x, enemy.y - enemy.size, `盾 ${Math.round(absorbed)}`, "#79dfff", 9);
+    if (preferences.damageNumbers) addFloater(enemy.x, enemy.y - enemy.size, `盾 ${Math.round(absorbed)}`, "#79dfff", 9);
     if (amount <= 0) return;
   }
   enemy.hp -= amount;
   enemy.flash = 0.075;
-  if (!secondary || Math.random() < 0.3) {
+  if (preferences.damageNumbers && (!secondary || Math.random() < 0.3)) {
     addFloater(enemy.x + rand(-4, 4), enemy.y - enemy.size, Math.round(amount), critical ? "#fff46a" : "#eef6dc", critical ? 15 : 10);
   }
   if (critical) {
@@ -3111,7 +3149,7 @@ function activatePulse() {
   game.banner = { text: player.combatClass.ultimateName, sub: subtitles[type] || "终极系统已启动", time: 2.65 };
   game.shake = Math.max(game.shake, 7);
   game.flash = .18;
-  if (navigator.vibrate) navigator.vibrate([45, 35, 80]);
+  vibrateFeedback([45, 35, 80]);
   if (game.tutorial?.active && game.tutorial.step === "ultimate") {
     game.tutorial.active = false;
     completeTutorial(true);
@@ -4110,7 +4148,7 @@ function render() {
 
   if (game) {
     ctx.save();
-    if (game.shake > 0) ctx.translate(rand(-game.shake, game.shake), rand(-game.shake, game.shake));
+    if (!preferences.reduceMotion && game.shake > 0) ctx.translate(rand(-game.shake, game.shake), rand(-game.shake, game.shake));
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
@@ -6785,11 +6823,61 @@ function unlockAudio() {
   if (audioContext.state === "suspended") audioContext.resume();
 }
 
+function renderSettings() {
+  if (!ui.settingsModal) return;
+  ui.settingsProfile.textContent = PERFORMANCE_PROFILE.name;
+  ui.qualityChoices.querySelectorAll("[data-quality]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.quality === preferences.quality);
+    button.setAttribute("aria-pressed", String(button.dataset.quality === preferences.quality));
+  });
+  ui.settingsModal.querySelectorAll("[data-setting]").forEach((button) => {
+    const enabled = Boolean(preferences[button.dataset.setting]);
+    button.classList.toggle("active", enabled);
+    button.setAttribute("aria-pressed", String(enabled));
+    button.querySelector("i").textContent = enabled ? "开启" : "关闭";
+  });
+}
+
+function applyPreferences(persist = true) {
+  PERFORMANCE_PROFILE = getPerformanceProfile();
+  document.documentElement.classList.toggle("reduce-motion", preferences.reduceMotion);
+  muted = !preferences.sfx;
+  ui.mute.textContent = muted ? "×" : "⌁";
+  ui.mute.setAttribute("aria-label", muted ? "开启音效" : "关闭音效");
+  if (game) {
+    game.performance.qualityCeiling = PERFORMANCE_PROFILE.qualityCeiling;
+    game.performance.qualityFloor = PERFORMANCE_PROFILE.qualityFloor;
+    game.performance.targetFps = PERFORMANCE_PROFILE.targetFps;
+    game.performance.quality = Math.min(PERFORMANCE_PROFILE.qualityCeiling, Math.max(PERFORMANCE_PROFILE.qualityFloor, game.performance.quality));
+    if (preferences.reduceMotion) game.shake = 0;
+  }
+  if (persist) savePreferences();
+  renderSettings();
+}
+
+function openSettings(showPrivacy = false) {
+  renderSettings();
+  if (showPrivacy) ui.privacyDetails.open = true;
+  ui.settingsModal.classList.remove("hidden");
+}
+
+function closeSettings() {
+  ui.settingsModal.classList.add("hidden");
+}
+
+function vibrateFeedback(pattern) {
+  if (!preferences.haptics || preferences.reduceMotion || !navigator.vibrate) return;
+  navigator.vibrate(pattern);
+}
+
 function setMuted(nextMuted) {
   muted = nextMuted;
+  preferences.sfx = !muted;
   ui.mute.textContent = muted ? "×" : "⌁";
   ui.mute.setAttribute("aria-label", muted ? "开启音效" : "关闭音效");
   if (!muted) unlockAudio();
+  savePreferences();
+  renderSettings();
 }
 
 function tone(frequency, duration, type = "sine", volume = 0.03, endMultiplier = 1) {
@@ -6977,6 +7065,7 @@ ui.endEndlessButton.addEventListener("click", () => {
 });
 ui.pause.addEventListener("click", () => togglePause());
 ui.pauseResume.addEventListener("click", () => togglePause(false));
+ui.pauseSettings.addEventListener("click", () => openSettings());
 ui.pauseExit.addEventListener("click", () => {
   pointerMove.active = false;
   if (game) game.move = { x: 0, y: 0 };
@@ -6997,6 +7086,27 @@ ui.pulse.addEventListener("click", () => {
 ui.unequipAllGear.addEventListener("click", unequipAllGear);
 ui.mute.addEventListener("click", () => {
   setMuted(!muted);
+});
+ui.settingsButton.addEventListener("click", () => openSettings());
+ui.privacyLink.addEventListener("click", () => openSettings(true));
+ui.settingsModal.querySelector("[data-close-settings]").addEventListener("click", closeSettings);
+ui.settingsModal.addEventListener("click", (event) => {
+  if (event.target === ui.settingsModal) closeSettings();
+});
+ui.qualityChoices.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-quality]");
+  if (!button || !["auto", "smooth", "quality"].includes(button.dataset.quality)) return;
+  preferences.quality = button.dataset.quality;
+  applyPreferences();
+  showToast(`画质已切换为${button.querySelector("b").textContent}模式`);
+});
+ui.settingsModal.querySelectorAll("[data-setting]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const key = button.dataset.setting;
+    preferences[key] = !preferences[key];
+    if (key === "sfx" && preferences.sfx) unlockAudio();
+    applyPreferences();
+  });
 });
 
 function updatePointerMovement(event) {
@@ -7099,6 +7209,7 @@ if (QA_MODE) {
 }
 
 async function bootGame() {
+  applyPreferences(false);
   await purgeLegacyAssetCaches();
   await preloadAllGameAssets();
   await purgeLegacyAssetCaches();

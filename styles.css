@@ -531,6 +531,7 @@ h1 {
 .pause-card span { display:block; margin:6px 0 21px; color:#9ba69f; font-size:10px; }
 .pause-card button { width:100%; height:43px; border-radius:12px; font-size:10px; font-weight:900; }
 .pause-resume { border:1px solid rgba(166,255,96,.4); color:#e9ffd7; background:linear-gradient(135deg,rgba(91,157,49,.55),rgba(26,73,43,.75)); }
+.pause-settings { margin-top:9px; border:1px solid rgba(112,225,255,.2); color:#aeeeff; background:rgba(35,104,123,.16); }
 .pause-exit { margin-top:9px; border:1px solid rgba(255,130,115,.2); color:#dbaaa3; background:rgba(103,35,29,.18); }
 
 .toast {
@@ -907,6 +908,36 @@ h1 {
 .modal-card h2 { margin: 5px 0 13px; font-size: 23px; }
 .modal-kicker { margin: 0; color: var(--acid); font-size: 8px; font-weight: 900; letter-spacing: .2em; }
 .modal-close { position: absolute; top: 12px; right: 12px; width: 31px; height: 31px; border: 0; border-radius: 10px; background: rgba(255,255,255,.06); color: #aeb8b0; font-size: 19px; }
+.settings-card { max-height:min(760px,calc(100dvh - 36px));overflow:auto;scrollbar-width:none; }
+.settings-card::-webkit-scrollbar { display:none; }
+.settings-device-summary { display:grid;grid-template-columns:8px 1fr auto;align-items:center;gap:8px;margin:-2px 0 16px;padding:10px 11px;border:1px solid color-mix(in srgb,var(--acid) 18%,transparent);border-radius:12px;background:color-mix(in srgb,var(--acid) 5%,transparent); }
+.settings-device-summary > i { width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 10px var(--acid); }
+.settings-device-summary span { color:var(--ui-muted);font-size:8px; }
+.settings-device-summary b { color:var(--acid);font-size:8px; }
+.settings-section { margin-bottom:10px; }
+.settings-heading { display:flex;align-items:center;justify-content:space-between;margin:0 2px 8px; }
+.settings-heading span { font-size:9px;font-weight:900; }
+.settings-heading small { color:var(--ui-muted);font-size:7px; }
+.quality-choices { display:grid;grid-template-columns:repeat(3,1fr);gap:6px; }
+.quality-choices button { min-height:57px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:11px;color:#c4cec7;background:rgba(255,255,255,.025);text-align:left; }
+.quality-choices button b { font-size:9px; }
+.quality-choices button small { color:#6f7d75;font-size:6px;line-height:1.35; }
+.quality-choices button.active { border-color:color-mix(in srgb,var(--acid) 45%,transparent);color:var(--acid);background:color-mix(in srgb,var(--acid) 8%,transparent);box-shadow:inset 0 0 17px color-mix(in srgb,var(--acid) 5%,transparent); }
+.settings-list { display:grid;gap:6px;margin:12px 0; }
+.setting-toggle { min-height:50px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid rgba(255,255,255,.075);border-radius:12px;color:#e1e9e3;background:rgba(255,255,255,.025);text-align:left; }
+.setting-toggle > span { display:flex;flex-direction:column;gap:3px; }
+.setting-toggle b { font-size:9px; }
+.setting-toggle small { color:var(--ui-muted);font-size:7px; }
+.setting-toggle > i { min-width:39px;padding:5px 7px;border-radius:20px;color:#78847c;background:rgba(255,255,255,.055);font-size:7px;font-style:normal;font-weight:900;text-align:center; }
+.setting-toggle.active > i { color:#07130d;background:var(--acid);box-shadow:0 0 14px color-mix(in srgb,var(--acid) 30%,transparent); }
+.privacy-details { border:1px solid rgba(255,255,255,.07);border-radius:12px;background:rgba(255,255,255,.02); }
+.privacy-details summary { display:flex;align-items:center;justify-content:space-between;padding:11px;color:#aebbb3;font-size:8px;font-weight:850;cursor:pointer;list-style:none; }
+.privacy-details summary::-webkit-details-marker { display:none; }
+.privacy-details summary i { font-size:15px;font-style:normal;transition:transform .2s ease; }
+.privacy-details[open] summary i { transform:rotate(90deg); }
+.privacy-details p,.privacy-details ul { margin:0;padding:0 12px 10px;color:#7f8d85;font-size:7px;line-height:1.65; }
+.privacy-details ul { padding-left:27px; }
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation-duration:.001ms !important;animation-iteration-count:1 !important;scroll-behavior:auto !important; }
 .prototype-notice { padding: 8px 10px; border: 1px solid rgba(255,207,81,.18); border-radius: 9px; background: rgba(255,202,70,.06); color: #e5c56a; font-size: 8px; }
 .coin-packs { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin: 14px 0 10px; }
 .coin-pack { padding: 13px 5px 10px; border: 1px solid rgba(255,218,95,.17); border-radius: 12px; background: rgba(255,213,74,.055); text-align: center; }
@@ -1057,6 +1088,7 @@ h1 {
 .login-methods .douyin-mark { color:#ff8fb2;background:linear-gradient(135deg,rgba(71,245,255,.13),rgba(255,68,130,.13)); }
 .login-methods span { font-size:7px;font-weight:800; }
 .login-legal { margin:7px 0 0;color:#4f6267;font-size:5px;text-align:center; }
+.login-legal button { padding:0;border:0;color:#769299;background:transparent;font-size:inherit;text-decoration:underline; }
 @keyframes openingDrift { to { transform:scale(1.025) translateY(-4px); } }
 @keyframes openingSpin { to { transform:rotate(360deg); } }
 @keyframes openingShine { 0%,55% { left:-35%; } 82%,100% { left:120%; } }
@@ -1064,6 +1096,7 @@ h1 {
 .home-screen { padding:max(16px,env(safe-area-inset-top)) 14px max(12px,env(safe-area-inset-bottom)); }
 .home-header { grid-template-columns:1fr auto; gap:8px; }
 .home-actions { display:flex;align-items:center;gap:6px; }
+.settings-pill { width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#aebeb5;background:rgba(255,255,255,.045);font-size:14px; }
 .energy-pill { height:34px;display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid rgba(100,205,255,.28);border-radius:12px;color:#8de8ff;background:rgba(53,142,181,.10);box-shadow:inset 0 0 12px rgba(80,205,255,.06); }
 .energy-pill span { font-size:11px;text-shadow:0 0 9px #63dfff; }
 .energy-pill b { color:#d9f8ff;font-size:8px; }
