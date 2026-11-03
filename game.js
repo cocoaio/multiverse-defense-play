@@ -3109,6 +3109,11 @@ function spawnEnemy(type, x, y, forcedAngle) {
     sway: rand(0, Math.PI * 2),
     curveSign: Math.random() < .5 ? -1 : 1,
     pursuitPhase: rand(0, Math.PI * 2),
+    walkPhase: rand(0, Math.PI * 2),
+    motionSpeed: 0,
+    isMoving: false,
+    locomotionPoseRendered: false,
+    footPlantRendered: false,
     attackTimer: rand(0.2, 0.8),
     attackWindup: 0,
     attackWindupMax: 0,
@@ -3869,6 +3874,9 @@ function activateBossPhase(enemy, phase) {
 function updateEnemies(dt) {
   for (const enemy of game.enemies) {
     if (enemy.dead) continue;
+    const previousX = enemy.x;
+    const previousY = enemy.y;
+    enemy.isMoving = false;
     enemy.flash = Math.max(0, enemy.flash - dt);
     enemy.hitKick = Math.max(0, (enemy.hitKick || 0) - dt * 62);
     enemy.hitReactionTimer = Math.max(0, (enemy.hitReactionTimer || 0) - dt);
@@ -3923,6 +3931,7 @@ function updateEnemies(dt) {
     if (enemy.attackWindup > 0) {
       enemy.attackWindup = Math.max(0, enemy.attackWindup - dt);
       if (enemy.attackWindup <= 0) resolveEnemyAttack(enemy);
+      enemy.motionSpeed *= Math.exp(-dt * 14);
       continue;
     }
     const slow = enemy.slowTimer > 0 ? 0.5 : 1;
@@ -3966,6 +3975,11 @@ function updateEnemies(dt) {
         beginEnemyAttack(enemy, windup);
       }
     }
+    const distanceMoved = Math.hypot(enemy.x - previousX, enemy.y - previousY);
+    const measuredSpeed = distanceMoved / Math.max(.001, dt);
+    enemy.motionSpeed += (measuredSpeed - enemy.motionSpeed) * Math.min(1, dt * 12);
+    enemy.isMoving = distanceMoved > .025 && enemy.attackWindup <= 0;
+    if (enemy.isMoving) enemy.walkPhase += distanceMoved * (enemy.type === "runner" ? .43 : .3);
   }
   game.enemies = game.enemies.filter((enemy) => !enemy.dead);
 }
@@ -6578,6 +6592,11 @@ function drawBattlefield() {
   const petPosition = game.player.companionPet ? getCompanionPetPosition() : null;
   const companionActor = petPosition ? { companion: true, ...petPosition } : null;
   const visibleEnemies = game.enemies.filter((enemy) => isWorldPointVisible(enemy.x, enemy.y, enemy.size + 48));
+  game.enemyArticulationRendered = 0;
+  for (const enemy of visibleEnemies) {
+    enemy.locomotionPoseRendered = false;
+    enemy.footPlantRendered = false;
+  }
   const actors = [...visibleEnemies, game.player, ...(companionActor ? [companionActor] : [])];
   actors.sort((a, b) => {
     const aDepth = a === game.player ? a.y + 30 : a.companion ? a.y + 19 : a.y + a.size * .92;
@@ -7980,6 +7999,82 @@ function drawEnemyHitReactionLayer(enemy, s, pulse) {
   ctx.restore();
 }
 
+function isEnemyArticulationEligible(enemy) {
+  return enemy.type !== "boss" && ["city", "snow", "mars", "moon", "cultivation"].includes(game.scene.id);
+}
+
+function drawArticulatedEnemySprite(image, sourceX, sourceWidth, sourceHeight, destinationX, destinationY, width, height, enemy) {
+  const budget = LOW_POWER_DEVICE ? 10 : 20;
+  if (!isEnemyArticulationEligible(enemy) || game.enemyArticulationRendered >= budget || !isAssetRenderable(image)) return false;
+  game.enemyArticulationRendered += 1;
+  enemy.locomotionPoseRendered = true;
+  enemy.footPlantRendered = true;
+
+  const moving = enemy.isMoving && enemy.attackWindup <= 0;
+  const motionWeight = moving ? Math.min(1, .34 + (enemy.motionSpeed || 0) / Math.max(42, enemy.speed || 42) * .66) : 0;
+  const phase = enemy.walkPhase || 0;
+  const step = Math.sin(phase) * motionWeight;
+  const split = .565;
+  const overlap = .024;
+  const hipY = destinationY + height * split;
+  const sourceSplitY = sourceHeight * split;
+  const sourceLowerHeight = sourceHeight * (1 - split);
+  const destinationLowerHeight = height * (1 - split);
+
+  // The feet darken and compress against the same ground plane as the actor
+  // shadow. This makes contact legible without adding particles per enemy.
+  ctx.save();
+  ctx.filter = "none";
+  ctx.globalAlpha *= .17 + motionWeight * .08;
+  ctx.fillStyle = game.scene.id === "cultivation" ? "#9bd8b2" : game.scene.id === "snow" ? "#dff8ff" : "#171c20";
+  for (const side of [-1, 1]) {
+    const footPhase = side < 0 ? step : -step;
+    const planted = 1 - Math.max(0, footPhase) * .58;
+    ctx.beginPath();
+    ctx.ellipse(destinationX + width * (.5 + side * .105 + footPhase * .025), destinationY + height * .985, width * .105 * planted, height * .018, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Two independent lower-body crops create a genuine alternating stride.
+  // The upper crop is then counter-balanced so the enemy no longer slides as
+  // one rigid card across the battlefield.
+  for (const side of [-1, 1]) {
+    const legPhase = side < 0 ? step : -step;
+    const lift = Math.max(0, legPhase) * height * .024;
+    const halfSourceWidth = sourceWidth * .5;
+    const halfDestinationWidth = width * .5;
+    const hipX = destinationX + width * (.5 + side * .105);
+    ctx.save();
+    ctx.translate(hipX, hipY);
+    ctx.rotate(legPhase * (enemy.type === "runner" ? .105 : .068));
+    ctx.translate(0, -lift);
+    drawImageSafe(
+      image,
+      sourceX + (side < 0 ? 0 : halfSourceWidth), sourceSplitY,
+      halfSourceWidth, sourceLowerHeight,
+      destinationX + (side < 0 ? 0 : halfDestinationWidth) - hipX,
+      0,
+      halfDestinationWidth, destinationLowerHeight,
+    );
+    ctx.restore();
+  }
+
+  const torsoLean = step * (enemy.type === "runner" ? -.028 : -.016);
+  const torsoShift = step * width * .012;
+  ctx.save();
+  ctx.translate(destinationX + width * .5 + torsoShift, hipY);
+  ctx.rotate(torsoLean);
+  drawImageSafe(
+    image,
+    sourceX, 0, sourceWidth, sourceHeight * (split + overlap),
+    -width * .5, -height * split,
+    width, height * (split + overlap),
+  );
+  ctx.restore();
+  return true;
+}
+
 function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
@@ -8028,7 +8123,9 @@ function drawEnemy(enemy) {
   const entryAngle = enemy.openingEntryAngle || 0;
   ctx.translate(enemy.x + Math.cos(entryAngle) * entryOffset + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x, enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y);
   if (enemy.openingEntrant && openingProgress < 1) ctx.scale(.68 + openingEase * .32, .76 + openingEase * .24);
-  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean + reactionRotate * reactionMotion + bossPose.rotation);
+  const articulatedPose = isEnemyArticulationEligible(enemy);
+  const idleRock = articulatedPose ? 0 : Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06);
+  ctx.rotate(idleRock + attackLean * (articulatedPose ? .32 : 1) + reactionRotate * reactionMotion + bossPose.rotation);
   ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (enemy.type === "boss" && enemy.bossReaction > 0) {
@@ -8090,12 +8187,17 @@ function drawCityZombieEnemy(enemy, s, frozen) {
   const scale = enemy.type === "boss" ? 1.08 : enemy.type === "tank" ? 1.03 : enemy.type === "mini" ? .72 : 1;
   const width = s * 2.42 * scale;
   const height = s * 3.28 * scale;
+  const articulated = isEnemyArticulationEligible(enemy);
   ctx.save();
-  ctx.translate(stride * s * .075, -Math.abs(stride) * s * .055);
-  ctx.rotate(stride * (enemy.type === "runner" ? .075 : .025));
+  if (!articulated) {
+    ctx.translate(stride * s * .075, -Math.abs(stride) * s * .055);
+    ctx.rotate(stride * (enemy.type === "runner" ? .075 : .025));
+  }
   if (frozen) ctx.filter = "saturate(.45) hue-rotate(145deg) brightness(1.18)";
   if (enemy.flash > 0) ctx.filter = "brightness(2.25) saturate(.22)";
-  const spriteRendered = drawImageSafe(cityZombieAtlas, sourceWidth * variant, 0, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height);
+  const spriteRendered = articulated
+    ? drawArticulatedEnemySprite(cityZombieAtlas, sourceWidth * variant, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height, enemy)
+    : drawImageSafe(cityZombieAtlas, sourceWidth * variant, 0, sourceWidth, cityZombieAtlas.naturalHeight, -width / 2, -height * .73, width, height);
   if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.roundRect(-s * .42, -s * 1.45, s * .84, s * 2.1, s * .3); ctx.fill(); }
   ctx.filter = "none";
   if (enemy.type === "runner") {
@@ -8119,11 +8221,14 @@ function drawAtlasEnemy(enemy, s, frozen) {
   const stride = Math.sin(game.elapsed * (enemy.type === "runner" ? 13 : 7) + enemy.sway) * s * .08;
   ctx.save();
   const grounded = !["hospital", "orbit"].includes(game.scene.id);
-  ctx.translate(grounded ? stride * .55 : 0, grounded ? Math.abs(stride) * -.08 : stride * .55);
-  if (grounded) ctx.rotate(stride * (enemy.type === "runner" ? .006 : .003));
+  const articulated = grounded && isEnemyArticulationEligible(enemy);
+  ctx.translate(articulated ? 0 : grounded ? stride * .55 : 0, articulated ? 0 : grounded ? Math.abs(stride) * -.08 : stride * .55);
+  if (grounded && !articulated) ctx.rotate(stride * (enemy.type === "runner" ? .006 : .003));
   if (frozen) ctx.filter = "saturate(.5) hue-rotate(145deg) brightness(1.2)";
   if (enemy.flash > 0) ctx.filter = "brightness(2.2) saturate(.2)";
-  const spriteRendered = drawImageSafe(enemyAtlas, sourceWidth * sceneIndex, 0, sourceWidth, enemyAtlas.naturalHeight, -width / 2, -height * .69, width, height);
+  const spriteRendered = articulated
+    ? drawArticulatedEnemySprite(enemyAtlas, sourceWidth * sceneIndex, sourceWidth, enemyAtlas.naturalHeight, -width / 2, -height * .69, width, height, enemy)
+    : drawImageSafe(enemyAtlas, sourceWidth * sceneIndex, 0, sourceWidth, enemyAtlas.naturalHeight, -width / 2, -height * .69, width, height);
   if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.arc(0, -s * .28, s * .72, 0, Math.PI * 2); ctx.fill(); }
   ctx.filter = "none";
   if (enemy.type === "splitter") {
@@ -8154,16 +8259,21 @@ function drawCultivationEnemy(enemy, s, frozen) {
   const scale = enemy.type === "boss" ? .92 : enemy.type === "tank" ? 1.04 : enemy.type === "mini" ? .78 : 1;
   const width = s * 2.15 * scale;
   const height = s * 3.55 * scale;
+  const articulated = isEnemyArticulationEligible(enemy);
   ctx.save();
-  ctx.translate(stride * s * .06, -Math.abs(stride) * s * .08);
-  ctx.rotate(stride * (enemy.type === "runner" ? .08 : .035));
+  if (!articulated) {
+    ctx.translate(stride * s * .06, -Math.abs(stride) * s * .08);
+    ctx.rotate(stride * (enemy.type === "runner" ? .08 : .035));
+  }
   const aura = ctx.createRadialGradient(0, -s * .25, s * .2, 0, -s * .25, s * 1.45);
   aura.addColorStop(0, colorAlpha(enemy.color, .18)); aura.addColorStop(1, colorAlpha(enemy.color, 0));
   ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, -s * .2, s * 1.45, 0, Math.PI * 2); ctx.fill();
   if (isAssetRenderable(cultivatorEnemyAtlas)) {
     if (frozen) ctx.filter = "saturate(.45) hue-rotate(125deg) brightness(1.15)";
     if (enemy.flash > 0) ctx.filter = "brightness(2.25) saturate(.25)";
-    const spriteRendered = drawImageSafe(cultivatorEnemyAtlas, sourceWidth * variant, 0, sourceWidth, cultivatorEnemyAtlas.naturalHeight, -width / 2, -height * .76, width, height);
+    const spriteRendered = articulated
+      ? drawArticulatedEnemySprite(cultivatorEnemyAtlas, sourceWidth * variant, sourceWidth, cultivatorEnemyAtlas.naturalHeight, -width / 2, -height * .76, width, height, enemy)
+      : drawImageSafe(cultivatorEnemyAtlas, sourceWidth * variant, 0, sourceWidth, cultivatorEnemyAtlas.naturalHeight, -width / 2, -height * .76, width, height);
     if (!spriteRendered) { ctx.fillStyle = enemy.color; ctx.fillRect(-s * .35, -s * 1.4, s * .7, s * 2.1); }
     ctx.filter = "none";
   } else {
@@ -10928,6 +11038,18 @@ if (QA_MODE) {
         strength: Number((enemy.hitReactionStrength || 0).toFixed(2)),
         rendered: Boolean(enemy.hitReactionRendered),
       })),
+      enemyLocomotion: {
+        moving: game.enemies.filter((enemy) => enemy.isMoving).length,
+        articulated: game.enemies.filter((enemy) => enemy.locomotionPoseRendered).length,
+        planted: game.enemies.filter((enemy) => enemy.footPlantRendered).length,
+        budget: LOW_POWER_DEVICE ? 10 : 20,
+        samples: game.enemies.filter((enemy) => enemy.locomotionPoseRendered).slice(0, 8).map((enemy) => ({
+          type: enemy.type,
+          moving: Boolean(enemy.isMoving),
+          speed: Number((enemy.motionSpeed || 0).toFixed(1)),
+          phase: Number((enemy.walkPhase || 0).toFixed(2)),
+        })),
+      },
       impactMaterials: [...new Set(game.impactBursts.map((burst) => burst.material).filter(Boolean))],
       xpDrops: game.xpDrops.length,
       gearDrops: game.gearDrops.length,
