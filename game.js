@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "87";
+const ASSET_REVISION = "88";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -645,6 +645,24 @@ const enemySkillThemes = {
   moon: { rangedStyle: "lunarShard", casterStyle: "gravityOrb", rangedName: "月岩裂片", casterName: "静海重力球", effect: "gravity", curve: -.22 },
   cultivation: { rangedStyle: "flyingSword", casterStyle: "talisman", rangedName: "追魂飞剑", casterName: "镇灵法符", effect: "seal", curve: .14 },
 };
+
+// The first contact is art-directed per battlefield. These profiles are used
+// by both the enemy ingress lane and the screen-space threat card, so the
+// opening reads as part of the world instead of three actors popping in at the
+// edge of the camera.
+const openingIncursionProfiles = {
+  city: { code: "BREACH 03", title: "三号街口失守", detail: "感染群沿破损封锁线压入", motif: "barricade", color: "#d9ff72", danger: "#ff6b4e", angles: [2.72, .42, 1.48] },
+  snow: { code: "WHITEOUT", title: "暴风雪中有巨影", detail: "冰原异变体踏碎冻结补给线", motif: "glacier", color: "#dffbff", danger: "#79dcff", angles: [-2.42, -.72, -1.58] },
+  hospital: { code: "BIOHAZARD", title: "隔离舱密封失效", detail: "高危病原体正穿透无菌走廊", motif: "quarantine", color: "#93ffd8", danger: "#ff5f91", angles: [3.02, .12, -1.5] },
+  orbit: { code: "VOID CONTACT", title: "虫群跃迁信号锁定", detail: "三组虚空目标切入近地航道", motif: "warp", color: "#8ff6ff", danger: "#c67dff", angles: [-2.64, -.48, 1.56] },
+  mars: { code: "RED DUST", title: "沙暴生命反应激增", detail: "原生体正越过前哨警戒环", motif: "dust", color: "#ffd178", danger: "#ff6849", angles: [2.5, .65, -1.62] },
+  moon: { code: "SEA OF SILENCE", title: "静海遗迹开始苏醒", detail: "远古守卫沿重力裂隙逼近", motif: "gravity", color: "#eeeaff", danger: "#9e91ff", angles: [-2.72, -.35, 1.62] },
+  cultivation: { code: "TAIXU DOMAIN", title: "护山剑域遭到叩阵", detail: "太虚修士踏云越过宗门界碑", motif: "inkgate", color: "#ddffe2", danger: "#e9c977", angles: [2.76, .36, -1.54] },
+};
+
+function getOpeningIncursionProfile(sceneId = game?.scene?.id || "city") {
+  return openingIncursionProfiles[sceneId] || openingIncursionProfiles.city;
+}
 
 const bossPhaseThemes = {
   city: ["暴君苏醒", "血肉超载", "毁城狂怒"],
@@ -2068,6 +2086,16 @@ function makeGame(runType = "main") {
     newPlayerRamp,
     openingGrace: newPlayerRamp ? 8 : 0,
     pacingCueShown: false,
+    openingSequence: {
+      profile: getOpeningIncursionProfile(scene.id),
+      time: 0,
+      duration: newPlayerRamp ? 8 : 4.8,
+      stage: "vector-lock",
+      entryCount: 0,
+      rendered: false,
+      motifRendered: false,
+      completed: false,
+    },
     initialEnemyCount: showcase ? 12 : newPlayerRamp ? 3 : 5,
     spawnTimer: 0.45,
     shotTimer: 0.1,
@@ -2321,9 +2349,18 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (showcase) configureShowcaseBuild(game);
   const launchTutorial = showcase || (runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
     && !meta.tutorial.completed && (tutorialFlow.battlePending || shouldAutoStartTutorial()));
+  const openingProfile = game.openingSequence.profile;
   for (let index = 0; index < game.initialEnemyCount; index += 1) {
     const type = index === game.initialEnemyCount - 1 && !game.newPlayerRamp ? "runner" : "grunt";
-    spawnEnemy(type, null, null, index / game.initialEnemyCount * Math.PI * 2 - Math.PI / 2);
+    const lane = openingProfile.angles[index % openingProfile.angles.length];
+    const formationOffset = Math.floor(index / openingProfile.angles.length) * .12 * (index % 2 ? 1 : -1);
+    const enemy = spawnEnemy(type, null, null, lane + formationOffset);
+    enemy.openingEntrant = true;
+    enemy.openingEntryDelay = index * .14;
+    enemy.openingEntryDuration = game.newPlayerRamp ? 1.35 : 1.05;
+    enemy.openingEntryAngle = lane;
+    enemy.openingEntryRendered = false;
+    game.openingSequence.entryCount += 1;
   }
   document.querySelector("#app").dataset.scene = game.scene.id;
   document.querySelector("#app").dataset.showcase = String(showcase);
@@ -2522,6 +2559,12 @@ function returnHome() {
 function update(dt) {
   game.elapsed += dt;
   game.openingGrace = Math.max(0, game.newPlayerRamp ? 8 - game.elapsed : 0);
+  if (game.openingSequence && !game.openingSequence.completed) {
+    const opening = game.openingSequence;
+    opening.time = Math.min(opening.duration, opening.time + dt);
+    opening.stage = opening.time < .72 ? "vector-lock" : opening.time < 2.45 ? "first-contact" : opening.time < opening.duration ? "pressure" : "secured";
+    opening.completed = opening.time >= opening.duration;
+  }
   game.flash = Math.max(0, game.flash - dt);
   game.divineAwakening = Math.max(0, game.divineAwakening - dt);
   updateDivineOverdrive(dt);
@@ -5662,6 +5705,7 @@ function render() {
     drawBattlefield();
     ctx.restore();
     drawBattleAtmosphere();
+    drawOpeningIncursionOverlay();
     drawVictorySequenceOverlay();
     drawBossPhaseTransitionOverlay();
     drawCinematicImpactOverlay();
@@ -6068,6 +6112,71 @@ function drawUltimateCinematicOverlay() {
   ctx.restore();
 }
 
+function drawOpeningIncursionGlyph(profile, progress) {
+  ctx.save();
+  ctx.strokeStyle = profile.color;
+  ctx.fillStyle = colorAlpha(profile.danger, .26);
+  ctx.lineWidth = 1.8;
+  if (profile.motif === "barricade") {
+    for (let row = -1; row <= 1; row += 1) {
+      ctx.beginPath(); ctx.moveTo(-19, row * 8 - 5); ctx.lineTo(-8, row * 8); ctx.lineTo(-19, row * 8 + 5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-5, row * 8 - 5); ctx.lineTo(6, row * 8); ctx.lineTo(-5, row * 8 + 5); ctx.stroke();
+    }
+  } else if (profile.motif === "glacier") {
+    ctx.beginPath(); ctx.moveTo(-22, 16); ctx.lineTo(-12, -14); ctx.lineTo(-3, 4); ctx.lineTo(7, -20); ctx.lineTo(21, 16); ctx.closePath(); ctx.fill(); ctx.stroke();
+  } else if (profile.motif === "quarantine") {
+    ctx.strokeRect(-20, -20, 40, 40); ctx.fillRect(-5, -15, 10, 30); ctx.fillRect(-15, -5, 30, 10);
+  } else if (profile.motif === "warp") {
+    for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.ellipse(0, 0, 7 + ring * 7, 18 - ring * 3, -.35 + ring * .28 + progress * .15, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (profile.motif === "dust") {
+    ctx.beginPath(); ctx.arc(-7, 2, 12, -1.8, 1.5); ctx.arc(5, 0, 17, -1.8, 1.5); ctx.arc(15, 3, 10, -1.8, 1.5); ctx.stroke();
+  } else if (profile.motif === "gravity") {
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, 23, 8, progress * .4, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, 23, 8, Math.PI / 2 + progress * .4, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-23, 12); ctx.bezierCurveTo(-8, -18, 8, 20, 23, -12); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, 15); ctx.moveTo(-6, 9); ctx.lineTo(6, 9); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawOpeningIncursionOverlay() {
+  const opening = game.openingSequence;
+  if (!opening || opening.time > 3.35 || game.victorySequence || game.ultimatePresentation) return;
+  const profile = opening.profile;
+  const appear = Math.min(1, opening.time / .28);
+  const fade = Math.min(1, (3.35 - opening.time) / .62);
+  const alpha = appear * fade;
+  const width = Math.min(W - 34, 362);
+  const height = 70;
+  const x = (W - width) / 2;
+  const y = Math.min(H - 198, H * .68);
+  const slide = preferences.reduceMotion ? 0 : (1 - appear) * 32;
+  opening.rendered = true;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (!LOW_POWER_DEVICE) {
+    const edge = ctx.createRadialGradient(W / 2, H / 2, H * .12, W / 2, H / 2, H * .62);
+    edge.addColorStop(.55, "rgba(0,0,0,0)"); edge.addColorStop(1, colorAlpha(profile.danger, .11 * alpha));
+    ctx.fillStyle = edge; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.translate(slide, 0);
+  ctx.fillStyle = "rgba(3,7,10,.89)";
+  ctx.beginPath(); ctx.roundRect(x, y, width, height, 10); ctx.fill();
+  ctx.strokeStyle = colorAlpha(profile.color, .72); ctx.lineWidth = 1.25;
+  ctx.beginPath(); ctx.roundRect(x, y, width, height, 10); ctx.stroke();
+  ctx.fillStyle = profile.danger; ctx.fillRect(x, y + 8, 3, height - 16);
+  ctx.fillStyle = colorAlpha(profile.danger, .13); ctx.fillRect(x + 4, y + 1, width * (.18 + appear * .42), 2);
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.fillStyle = profile.color; ctx.font = "950 8px system-ui"; ctx.fillText(`${profile.code} · THREAT VECTOR`, x + 16, y + 15);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 17px system-ui"; ctx.fillText(profile.title, x + 16, y + 37);
+  ctx.fillStyle = "rgba(235,246,244,.7)"; ctx.font = "750 9px system-ui"; ctx.fillText(profile.detail, x + 16, y + 57);
+  ctx.translate(x + width - 39, y + 35);
+  drawOpeningIncursionGlyph(profile, opening.time);
+  ctx.restore();
+}
+
 function drawBattleAtmosphere() {
   const sceneId = game.scene.id;
   ctx.save();
@@ -6328,6 +6437,89 @@ function drawCultivationBackdrop() {
   ctx.restore();
 }
 
+function getOpeningEntryProgress(enemy) {
+  if (!enemy?.openingEntrant) return 1;
+  const age = game.elapsed - (enemy.openingEntryDelay || 0);
+  return Math.max(0, Math.min(1, age / Math.max(.01, enemy.openingEntryDuration || 1)));
+}
+
+function drawOpeningIncursionMarkers() {
+  const opening = game.openingSequence;
+  if (!opening || opening.time > 3.35) return;
+  const profile = opening.profile;
+  const qualityStep = game.performance.quality < .58 ? 2 : 1;
+  const entrants = game.enemies.filter((enemy) => enemy.openingEntrant && !enemy.dead);
+  for (let index = 0; index < entrants.length; index += qualityStep) {
+    const enemy = entrants[index];
+    const age = game.elapsed - (enemy.openingEntryDelay || 0);
+    if (age < 0 || age > 2.85 || !isWorldPointVisible(enemy.x, enemy.y, 130)) continue;
+    const progress = getOpeningEntryProgress(enemy);
+    const alpha = Math.min(1, age / .22) * Math.min(1, (2.85 - age) / .65);
+    const towardPlayer = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
+    enemy.openingEntryRendered = true;
+    opening.motifRendered = true;
+    ctx.save();
+    ctx.translate(enemy.x, enemy.y + enemy.size * .72);
+    ctx.rotate(towardPlayer);
+    ctx.globalAlpha = alpha;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const laneLength = 76 + progress * 34;
+    const width = 18 + enemy.size * .48;
+    if (profile.motif === "barricade") {
+      ctx.strokeStyle = colorAlpha(profile.danger, .82); ctx.lineWidth = 3;
+      for (let chevron = 0; chevron < 3; chevron += 1) {
+        const x = 18 + chevron * 25 + progress * 8;
+        ctx.beginPath(); ctx.moveTo(x - 9, -width * .42); ctx.lineTo(x + 4, 0); ctx.lineTo(x - 9, width * .42); ctx.stroke();
+      }
+      ctx.strokeStyle = colorAlpha(profile.color, .34); ctx.lineWidth = 1.4; ctx.setLineDash([8, 6]);
+      ctx.beginPath(); ctx.moveTo(-26, -width); ctx.lineTo(laneLength, -width); ctx.moveTo(-26, width); ctx.lineTo(laneLength, width); ctx.stroke(); ctx.setLineDash([]);
+    } else if (profile.motif === "glacier") {
+      ctx.fillStyle = colorAlpha(profile.color, .22); ctx.strokeStyle = colorAlpha(profile.color, .76); ctx.lineWidth = 1.5;
+      for (let shard = 0; shard < 5; shard += 1) {
+        const x = -12 + shard * 23;
+        const h = 9 + (shard % 3) * 6;
+        ctx.beginPath(); ctx.moveTo(x, 7); ctx.lineTo(x + 8, -h); ctx.lineTo(x + 15, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(-22, 10); ctx.quadraticCurveTo(30, -15, laneLength, 5); ctx.stroke();
+    } else if (profile.motif === "quarantine") {
+      ctx.strokeStyle = colorAlpha(profile.color, .76); ctx.lineWidth = 2;
+      ctx.strokeRect(2, -width, 38, width * 2);
+      ctx.fillStyle = colorAlpha(profile.danger, .72); ctx.fillRect(15, -11, 12, 22); ctx.fillRect(10, -6, 22, 12);
+      ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(46, 0); ctx.lineTo(laneLength, 0); ctx.stroke(); ctx.setLineDash([]);
+    } else if (profile.motif === "warp") {
+      ctx.strokeStyle = colorAlpha(profile.color, .74); ctx.lineWidth = 2;
+      for (let ring = 0; ring < 3; ring += 1) {
+        const x = 2 + ring * 24 + progress * 8;
+        ctx.beginPath(); ctx.ellipse(x, 0, 6 + ring * 2, width * (.76 - ring * .11), 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.strokeStyle = colorAlpha(profile.danger, .46); ctx.beginPath(); ctx.moveTo(-24, -width * .55); ctx.lineTo(laneLength, 0); ctx.lineTo(-24, width * .55); ctx.stroke();
+    } else if (profile.motif === "dust") {
+      ctx.strokeStyle = colorAlpha(profile.color, .66); ctx.lineWidth = 3;
+      for (let plume = 0; plume < 3; plume += 1) {
+        ctx.beginPath(); ctx.arc(4 + plume * 25, (plume - 1) * 8, 13 + plume * 4, -1.7, 1.45); ctx.stroke();
+      }
+      ctx.strokeStyle = colorAlpha(profile.danger, .7); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(24, -10); ctx.lineTo(52, 8); ctx.lineTo(laneLength, -4); ctx.stroke();
+    } else if (profile.motif === "gravity") {
+      ctx.strokeStyle = colorAlpha(profile.color, .74); ctx.lineWidth = 1.7;
+      for (let orbit = 0; orbit < 3; orbit += 1) {
+        ctx.beginPath(); ctx.ellipse(25 + orbit * 15, 0, 20 + orbit * 10, 7 + orbit * 4, orbit * .22, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = profile.danger; ctx.beginPath(); ctx.arc(25 + progress * 24, 0, 3.4, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.strokeStyle = colorAlpha(profile.color, .72); ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(-20, 11); ctx.bezierCurveTo(18, -18, 54, 20, laneLength, -8); ctx.stroke();
+      ctx.strokeStyle = colorAlpha(profile.danger, .82); ctx.lineWidth = 2;
+      for (let sword = 0; sword < 3; sword += 1) {
+        const x = 18 + sword * 26; ctx.save(); ctx.translate(x, (sword - 1) * 7); ctx.rotate(-.25);
+        ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(12, 0); ctx.moveTo(7, -4); ctx.lineTo(12, 0); ctx.lineTo(7, 4); ctx.stroke(); ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+}
+
 function drawBattlefield() {
   ctx.save();
   const sequence = game.victorySequence;
@@ -6339,6 +6531,7 @@ function drawBattlefield() {
   ctx.scale(zoom, zoom);
   ctx.translate(-focusX, -focusY);
   drawWorldDecor();
+  drawOpeningIncursionMarkers();
   for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
   for (const wave of game.shockwaves) {
     if (!isWorldPointVisible(wave.x, wave.y, wave.radius + 24)) continue;
@@ -7772,6 +7965,11 @@ function drawEnemy(enemy) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
   ctx.save();
+  const openingProgress = getOpeningEntryProgress(enemy);
+  const openingEase = 1 - Math.pow(1 - openingProgress, 3);
+  if (enemy.openingEntrant && openingProgress < 1) {
+    ctx.globalAlpha = .18 + openingEase * .82;
+  }
   const kick = enemy.hitKick || 0;
   const kickAngle = enemy.hitAngle || 0;
   const reactionDuration = Math.max(.001, enemy.hitReactionMax || 0);
@@ -7807,7 +8005,10 @@ function drawEnemy(enemy) {
     ? (enemy.type === "ranged" || enemy.type === "caster" ? -.055 : -.12 + windupProgress * .15)
     : enemy.attackRecovery > 0 ? .07 * Math.min(1, enemy.attackRecovery / .18) : 0;
   const bossPose = enemy.type === "boss" ? getBossActionPose(enemy) : { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
-  ctx.translate(enemy.x + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x, enemy.y + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y);
+  const entryOffset = enemy.openingEntrant ? (1 - openingEase) * 34 : 0;
+  const entryAngle = enemy.openingEntryAngle || 0;
+  ctx.translate(enemy.x + Math.cos(entryAngle) * entryOffset + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x, enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y);
+  if (enemy.openingEntrant && openingProgress < 1) ctx.scale(.68 + openingEase * .32, .76 + openingEase * .24);
   ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean + reactionRotate * reactionMotion + bossPose.rotation);
   ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
@@ -10650,6 +10851,16 @@ if (QA_MODE) {
         initialEnemyCount: game.initialEnemyCount,
         missionTarget: game.missionTarget,
         waveSeconds: game.waveSeconds,
+        incursion: game.openingSequence ? {
+          code: game.openingSequence.profile.code,
+          motif: game.openingSequence.profile.motif,
+          stage: game.openingSequence.stage,
+          time: Number(game.openingSequence.time.toFixed(2)),
+          entryCount: game.openingSequence.entryCount,
+          rendered: Boolean(game.openingSequence.rendered),
+          motifRendered: Boolean(game.openingSequence.motifRendered),
+          entrantsRendered: game.enemies.filter((enemy) => enemy.openingEntryRendered).length,
+        } : null,
       },
       performance: {
         profile: PERFORMANCE_PROFILE.name,
