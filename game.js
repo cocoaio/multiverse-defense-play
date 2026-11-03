@@ -126,6 +126,7 @@ const sceneIds = ["city", "snow", "hospital", "orbit", "mars", "moon", "cultivat
 const sceneHeroSprites = Object.fromEntries(sceneIds.map((sceneId) => [sceneId, Object.fromEntries(heroClassIds.map((classId) => [classId, createAssetImage(`./assets/characters/${sceneId}/${classId}.png`)]))]));
 const assetResolvedUrls = new Map();
 const battlefieldPatternCache = new WeakMap();
+const canvasWarmAssetCache = new WeakSet();
 
 const BOOT_ASSET_SIZES = {
   "./assets/opening-splash-v1.jpg": 642358,
@@ -336,7 +337,23 @@ function ensureSceneAssets(sceneId) {
   return assets;
 }
 async function prepareSceneAssets(sceneId) {
-  const results = await Promise.all(ensureSceneAssets(sceneId).map((asset) => waitForAsset(asset)));
+  const assets = ensureSceneAssets(sceneId);
+  const results = await Promise.all(assets.map((asset) => waitForAsset(asset)));
+  await Promise.all(assets.map((asset) => asset.decode?.().catch(() => {}) || Promise.resolve()));
+  // Decoding alone does not guarantee that mobile Chrome/Safari has uploaded
+  // the texture to the Canvas backing store. Prime each scene asset while the
+  // loading modal is still visible so the first combat frame does not hitch.
+  const scratch = document.createElement("canvas");
+  scratch.width = scratch.height = 8;
+  const scratchContext = scratch.getContext("2d", { alpha: true });
+  for (const asset of assets) {
+    if (!scratchContext || !asset.naturalWidth || canvasWarmAssetCache.has(asset)) continue;
+    try {
+      scratchContext.clearRect(0, 0, 8, 8);
+      scratchContext.drawImage(asset, 0, 0, 8, 8);
+      canvasWarmAssetCache.add(asset);
+    } catch (error) { /* The visible renderer retains its vector fallback. */ }
+  }
   return results.every(Boolean);
 }
 const W = 390;
@@ -2159,6 +2176,7 @@ function makeGame(runType = "main") {
     boss: null,
     bossDemise: null,
     victorySequence: null,
+    bossCinematic: null,
     bossPhaseOverlayRendered: false,
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
@@ -2366,7 +2384,6 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   if (!showcase) {
     saveMeta();
   }
-  ui.loadoutModal.classList.add("hidden");
   game = makeGame(runType);
   if (showcase) configureShowcaseBuild(game);
   const launchTutorial = showcase || (runType === "main" && game.sceneIndex === 0 && game.missionLevel === 1
@@ -2386,6 +2403,11 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   }
   document.querySelector("#app").dataset.scene = game.scene.id;
   document.querySelector("#app").dataset.showcase = String(showcase);
+  // Render one complete battlefield frame behind the still-visible loading
+  // modal. This pays the first Canvas texture upload and articulated-sprite
+  // setup cost before the player receives control instead of hitching on step 1.
+  render();
+  ui.loadoutModal.classList.add("hidden");
   mode = "playing";
   paused = false;
   manuallyPaused = false;
@@ -2607,6 +2629,7 @@ function update(dt) {
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
   game.player.attackAnim = Math.max(0, game.player.attackAnim - dt * attackPlaybackRate);
   game.banner.time = Math.max(0, game.banner.time - dt);
+  updateBossCinematic(dt);
   game.comboTimer -= dt;
   if (game.comboTimer <= 0) game.combo = 0;
   if (game.victorySequence) {
@@ -3176,17 +3199,60 @@ function spawnEnemy(type, x, y, forcedAngle) {
 
 function spawnBoss() {
   game.bossSpawned = true;
-  game.boss = spawnEnemy("boss", game.player.x, game.player.y - (game.scene.endless ? 225 : 420));
+  game.boss = spawnEnemy("boss", game.player.x, game.player.y - (game.scene.endless ? 225 : 360));
   const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
   ui.bossName.textContent = bossName;
   game.boss.bossPhase = 1;
   game.boss.phaseTransition = 1.15;
+  beginBossCinematic(game.boss, "entrance", 1.15);
   game.banner = game.boss.divineFinaleGate
     ? { text: "神性装甲 · 极限战力墙", sub: `${bossName}已完成终章进化，永久神器可击穿其核心`, time: 4.2 }
     : { text: "警告 · 首领来袭", sub: `${bossName}正在接近`, time: 3.2 };
   game.shake = 9;
   tone(85, 0.5, "sawtooth", 0.06, 0.65);
   return game.boss;
+}
+
+function beginBossCinematic(enemy, type, duration = 1.35) {
+  if (!enemy || enemy.dead) return;
+  game.bossCinematic = {
+    bossId: enemy.id,
+    type,
+    phase: enemy.bossPhase || 1,
+    theme: game.scene.id,
+    motif: getBossCinematicMotif(game.scene.id),
+    time: 0,
+    duration,
+    cameraRendered: false,
+    overlayRendered: false,
+    motifRendered: false,
+    groundRendered: false,
+    bossRendered: false,
+    focusBlend: 0,
+  };
+}
+
+function getBossCinematicMotif(sceneId = game?.scene?.id) {
+  return ({
+    city: "breached-asphalt",
+    snow: "glacier-crown",
+    hospital: "bio-pulse",
+    orbit: "carrier-lock",
+    mars: "magma-fault",
+    moon: "gravity-well",
+    cultivation: "ink-sword-seal",
+  })[sceneId] || "threat-vector";
+}
+
+function updateBossCinematic(dt) {
+  const cinematic = game.bossCinematic;
+  if (!cinematic) return;
+  if (!game.boss || game.boss.dead || game.boss.id !== cinematic.bossId) {
+    game.bossCinematic = null;
+    return;
+  }
+  cinematic.time = Math.min(cinematic.duration, cinematic.time + dt);
+  if (cinematic.time >= cinematic.duration && !(game.boss.phaseTransition > 0)) game.bossCinematic = null;
 }
 
 function announceWave(wave) {
@@ -3900,6 +3966,7 @@ function activateBossPhase(enemy, phase) {
   enemy.bossDamageStage = Math.max(enemy.bossDamageStage || 0, phase - 1);
   enemy.bossDamagePulse = 1.15;
   enemy.phaseTransition = 1.35;
+  beginBossCinematic(enemy, "phase", 1.35);
   enemy.skillTimer = Math.min(enemy.skillTimer, .65);
   const phaseName = getBossPhaseName(phase);
   const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
@@ -5978,34 +6045,96 @@ function drawUpgradeFeedback() {
   ctx.restore();
 }
 
+function drawBossCinematicScreenMotif(sceneId, color, alpha, progress) {
+  const edge = 18 + progress * 24;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (sceneId === "city") {
+    ctx.lineWidth = 4;
+    for (const side of [-1, 1]) for (let slash = 0; slash < 3; slash += 1) {
+      const x = side < 0 ? edge + slash * 10 : W - edge - slash * 10;
+      ctx.beginPath(); ctx.moveTo(x, H * .2 + slash * 15); ctx.lineTo(x + side * 36, H * .43 + slash * 9); ctx.stroke();
+    }
+  } else if (sceneId === "snow") {
+    ctx.lineWidth = 2;
+    for (let shard = 0; shard < 5; shard += 1) {
+      const x = shard / 4 * W; const height = 22 + (shard % 2) * 18;
+      ctx.beginPath(); ctx.moveTo(x - 13, 0); ctx.lineTo(x, height); ctx.lineTo(x + 13, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 10, H); ctx.lineTo(x, H - height); ctx.lineTo(x + 10, H); ctx.stroke();
+    }
+  } else if (sceneId === "hospital") {
+    ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(0, H * .24); ctx.lineTo(W * .18, H * .24); ctx.lineTo(W * .24, H * .2); ctx.lineTo(W * .29, H * .31); ctx.lineTo(W * .34, H * .17); ctx.lineTo(W * .4, H * .24); ctx.lineTo(W, H * .24); ctx.stroke();
+    ctx.globalAlpha *= .48; ctx.beginPath(); ctx.arc(W * .82, H * .72, 34 + progress * 20, 0, Math.PI * 2); ctx.stroke();
+  } else if (sceneId === "orbit") {
+    ctx.lineWidth = 3;
+    for (const y of [H * .22, H * .78]) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W * .18, y); ctx.lineTo(W * .25, y + (y < H / 2 ? 18 : -18)); ctx.lineTo(W * .75, y + (y < H / 2 ? 18 : -18)); ctx.lineTo(W * .82, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.setLineDash([5, 7]); ctx.beginPath(); ctx.moveTo(W * .12, H * .18); ctx.lineTo(W * .88, H * .82); ctx.stroke(); ctx.setLineDash([]);
+  } else if (sceneId === "mars") {
+    ctx.lineWidth = 3.5; ctx.beginPath(); ctx.moveTo(0, H * .36); ctx.lineTo(W * .18, H * .39); ctx.lineTo(W * .26, H * .32); ctx.lineTo(W * .38, H * .43); ctx.lineTo(W * .5, H * .34); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W, H * .66); ctx.lineTo(W * .82, H * .62); ctx.lineTo(W * .74, H * .7); ctx.lineTo(W * .61, H * .57); ctx.stroke();
+  } else if (sceneId === "moon") {
+    ctx.lineWidth = 2;
+    for (const side of [-1, 1]) for (let orbit = 0; orbit < 3; orbit += 1) {
+      ctx.beginPath(); ctx.ellipse(side < 0 ? 0 : W, H * .48, 58 + orbit * 26 + progress * 12, 18 + orbit * 9, side * .18, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else {
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(-16, H * .28); ctx.bezierCurveTo(W * .12, H * .18, W * .22, H * .39, W * .36, H * .27); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W + 16, H * .72); ctx.bezierCurveTo(W * .88, H * .82, W * .78, H * .6, W * .64, H * .73); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.strokeRect(W - 65, H * .19, 35, 35); ctx.strokeRect(W - 59, H * .2 + 6, 23, 23);
+  }
+  ctx.restore();
+  if (game.bossCinematic) game.bossCinematic.motifRendered = true;
+}
+
 function drawBossPhaseTransitionOverlay() {
   const boss = game.boss;
   if (!boss || boss.dead || !(boss.phaseTransition > 0)) return;
   const phase = boss.bossPhase || 1;
-  const progress = Math.max(0, Math.min(1, 1 - boss.phaseTransition / 1.35));
+  const cinematic = game.bossCinematic;
+  const duration = cinematic?.duration || (phase === 1 ? 1.15 : 1.35);
+  const progress = cinematic ? Math.max(0, Math.min(1, cinematic.time / duration)) : Math.max(0, Math.min(1, 1 - boss.phaseTransition / duration));
   const alpha = Math.sin(progress * Math.PI);
   const profile = getBossSignature();
+  const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
   game.bossPhaseOverlayRendered = true;
+  if (cinematic) cinematic.overlayRendered = true;
   ctx.save();
-  ctx.fillStyle = `rgba(3,4,8,${(preferences.reduceMotion ? .08 : .18) * alpha})`;
-  ctx.fillRect(0, 0, W, H);
-  const bandHeight = 72;
-  const bandY = H * .54 - bandHeight / 2;
-  const slide = preferences.reduceMotion ? 0 : (1 - Math.min(1, progress * 3.2)) * W * .38;
-  if (LOW_POWER_DEVICE) {
-    ctx.fillStyle = `rgba(3,5,10,${.7 * alpha})`; ctx.fillRect(24, bandY, W - 48, bandHeight);
-  } else {
-    const band = ctx.createLinearGradient(0, bandY, W, bandY + bandHeight);
-    band.addColorStop(0, "rgba(3,5,10,0)"); band.addColorStop(.18, `rgba(3,5,10,${.82 * alpha})`); band.addColorStop(.82, `rgba(3,5,10,${.82 * alpha})`); band.addColorStop(1, "rgba(3,5,10,0)");
-    ctx.fillStyle = band; ctx.fillRect(0, bandY, W, bandHeight);
-  }
-  ctx.strokeStyle = colorAlpha(profile.color, .78 * alpha); ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(26 + slide, bandY + 5); ctx.lineTo(W - 26 + slide, bandY + 5); ctx.moveTo(26 - slide, bandY + bandHeight - 5); ctx.lineTo(W - 26 - slide, bandY + bandHeight - 5); ctx.stroke();
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, H * .2, W / 2, H / 2, H * .69);
+  vignette.addColorStop(.54, "rgba(2,4,8,0)"); vignette.addColorStop(1, `rgba(2,4,8,${(preferences.reduceMotion ? .12 : .34) * alpha})`);
+  ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+  drawBossCinematicScreenMotif(game.scene.id, colorAlpha(profile.color, .88), alpha * (LOW_POWER_DEVICE ? .42 : .72), progress);
+
+  const panelWidth = Math.min(340, W - 42);
+  const panelHeight = 82;
+  const panelX = (W - panelWidth) / 2;
+  const screenBossY = cinematic?.screenBossY ?? (boss.y <= game.player.y ? H * .31 : H * .69);
+  const screenPlayerY = cinematic?.screenPlayerY ?? H * .5;
+  const panelCandidates = [H * .36, H * .48, H * .61].map((value) => Math.max(176, Math.min(H - panelHeight - 154, value)));
+  const panelY = panelCandidates.reduce((best, candidate) => {
+    const candidateCenter = candidate + panelHeight / 2;
+    const bestCenter = best + panelHeight / 2;
+    const candidateClearance = Math.min(Math.abs(candidateCenter - screenBossY), Math.abs(candidateCenter - screenPlayerY));
+    const bestClearance = Math.min(Math.abs(bestCenter - screenBossY), Math.abs(bestCenter - screenPlayerY));
+    return candidateClearance > bestClearance ? candidate : best;
+  }, panelCandidates[0]);
+  const slide = preferences.reduceMotion ? 0 : (1 - Math.min(1, progress * 4)) * 28;
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = profile.color; ctx.font = "900 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(phase === 1 ? "BOSS ENCOUNTER" : `BOSS PHASE ${phase}`, W / 2, bandY + 19);
-  ctx.fillStyle = "#ffffff"; ctx.font = "950 22px system-ui"; ctx.fillText(`${game.scene.icon} ${getBossPhaseName(phase)}`, W / 2, bandY + 44);
-  ctx.fillStyle = colorAlpha(profile.color, .88); ctx.font = "800 9px system-ui"; ctx.fillText(profile.action, W / 2, bandY + 62);
+  ctx.fillStyle = `rgba(3,6,12,${LOW_POWER_DEVICE ? .84 : .76})`;
+  ctx.beginPath(); ctx.roundRect(panelX + slide, panelY, panelWidth, panelHeight, 5); ctx.fill();
+  ctx.fillStyle = colorAlpha(profile.color, .9); ctx.fillRect(panelX + slide, panelY, 4, panelHeight);
+  ctx.strokeStyle = colorAlpha(profile.color, .68); ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(panelX + 13 + slide, panelY + 7); ctx.lineTo(panelX + panelWidth - 12 + slide, panelY + 7); ctx.stroke();
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.fillStyle = profile.color; ctx.font = "900 9px system-ui";
+  ctx.fillText(phase === 1 ? "BOSS ENCOUNTER · 首领接敌" : `BOSS PHASE ${phase} · 战场形态重构`, panelX + 17 + slide, panelY + 20);
+  ctx.fillStyle = "#ffffff"; ctx.font = "950 20px system-ui";
+  ctx.fillText(`${bossName} · ${getBossPhaseName(phase)}`, panelX + 17 + slide, panelY + 44, panelWidth - 34);
+  ctx.fillStyle = colorAlpha(profile.color, .92); ctx.font = "800 9px system-ui";
+  ctx.fillText(`${profile.action} · ${phase === 1 ? "锁定首领本体" : "威胁等级正在上升"}`, panelX + 17 + slide, panelY + 66, panelWidth - 34);
   ctx.restore();
 }
 
@@ -6603,19 +6732,88 @@ function drawOpeningIncursionMarkers() {
   }
 }
 
+function getBossCinematicEnvelope() {
+  const cinematic = game?.bossCinematic;
+  if (!cinematic || !game.boss || game.boss.dead || cinematic.bossId !== game.boss.id) return 0;
+  const progress = Math.max(0, Math.min(1, cinematic.time / Math.max(.01, cinematic.duration)));
+  return Math.sin(progress * Math.PI);
+}
+
+function drawBossCinematicGround() {
+  const boss = game.boss;
+  const cinematic = game.bossCinematic;
+  const envelope = getBossCinematicEnvelope();
+  if (!boss || !cinematic || envelope <= .01) return;
+  const s = Math.max(34, boss.size);
+  const color = getBossSignature().color;
+  const pulse = .82 + envelope * .32;
+  ctx.save();
+  ctx.translate(boss.x, boss.y - s * .08);
+  const focusHalo = ctx.createRadialGradient(0, -s * .12, s * .18, 0, -s * .12, s * 1.95);
+  focusHalo.addColorStop(0, `rgba(2,4,8,${.66 * envelope})`);
+  focusHalo.addColorStop(.58, `rgba(2,4,8,${.42 * envelope})`);
+  focusHalo.addColorStop(.82, colorAlpha(color, .12 * envelope));
+  focusHalo.addColorStop(1, colorAlpha(color, 0));
+  ctx.fillStyle = focusHalo; ctx.beginPath(); ctx.ellipse(0, 0, s * 2.05, s * 2.35, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(boss.x, boss.y + s * .72);
+  ctx.scale(pulse, pulse * .55);
+  ctx.globalAlpha = envelope * (LOW_POWER_DEVICE ? .58 : .78);
+  ctx.strokeStyle = color; ctx.fillStyle = colorAlpha(color, .12); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.ellipse(0, 0, s * 1.58, s * 1.1, 0, 0, Math.PI * 2); ctx.fill();
+  if (game.scene.id === "city") {
+    ctx.lineWidth = 4;
+    for (let crack = 0; crack < 7; crack += 1) { const angle = crack / 7 * Math.PI * 2 + boss.sway; const radius = s * (1.15 + (crack % 3) * .18); ctx.beginPath(); ctx.moveTo(Math.cos(angle) * s * .2, Math.sin(angle) * s * .16); ctx.lineTo(Math.cos(angle + .13) * radius * .58, Math.sin(angle + .13) * radius * .58); ctx.lineTo(Math.cos(angle - .08) * radius, Math.sin(angle - .08) * radius); ctx.stroke(); }
+  } else if (game.scene.id === "snow") {
+    ctx.lineWidth = 2.5;
+    for (let shard = 0; shard < 8; shard += 1) { const angle = shard / 8 * Math.PI * 2; ctx.save(); ctx.rotate(angle); ctx.beginPath(); ctx.moveTo(s * .4, 0); ctx.lineTo(s * 1.48, -s * .2); ctx.lineTo(s * 1.18, s * .18); ctx.closePath(); ctx.stroke(); ctx.restore(); }
+  } else if (game.scene.id === "hospital") {
+    ctx.lineWidth = 2.5;
+    for (let cell = 0; cell < 6; cell += 1) { const angle = cell / 6 * Math.PI * 2; const x = Math.cos(angle) * s * .76; const y = Math.sin(angle) * s * .55; ctx.beginPath(); ctx.arc(x, y, s * .24, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x * .25, y * .25); ctx.lineTo(x, y); ctx.stroke(); }
+  } else if (game.scene.id === "orbit") {
+    ctx.lineWidth = 3;
+    for (let rail = 0; rail < 3; rail += 1) { const radius = s * (.62 + rail * .38); ctx.setLineDash([s * .28, s * .16]); ctx.lineDashOffset = rail * 11 - ambienceTime * 18; ctx.beginPath(); ctx.ellipse(0, 0, radius, radius * .7, rail * .16, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.setLineDash([]);
+  } else if (game.scene.id === "mars") {
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-s * 1.55, -s * .24); ctx.lineTo(-s * .78, s * .08); ctx.lineTo(-s * .23, -s * .12); ctx.lineTo(s * .28, s * .17); ctx.lineTo(s * .82, -s * .05); ctx.lineTo(s * 1.58, s * .2); ctx.stroke();
+    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-s * .45, -s * .08); ctx.lineTo(-s * .78, -s * .58); ctx.moveTo(s * .34, s * .12); ctx.lineTo(s * .62, s * .58); ctx.stroke();
+  } else if (game.scene.id === "moon") {
+    ctx.lineWidth = 2.5;
+    for (let ring = 0; ring < 4; ring += 1) { ctx.globalAlpha = envelope * (.76 - ring * .12); ctx.beginPath(); ctx.ellipse(0, 0, s * (.42 + ring * .36), s * (.3 + ring * .23), ring * .1, 0, Math.PI * 2); ctx.stroke(); }
+  } else {
+    ctx.lineWidth = 5;
+    for (let sword = 0; sword < 6; sword += 1) { ctx.save(); ctx.rotate(sword / 6 * Math.PI * 2 + ambienceTime * .08); ctx.beginPath(); ctx.moveTo(s * .55, 0); ctx.lineTo(s * 1.42, 0); ctx.stroke(); ctx.beginPath(); ctx.moveTo(s * 1.22, -s * .16); ctx.lineTo(s * 1.48, 0); ctx.lineTo(s * 1.22, s * .16); ctx.stroke(); ctx.restore(); }
+  }
+  ctx.restore();
+  cinematic.groundRendered = true;
+}
+
 function drawBattlefield() {
   ctx.save();
   const sequence = game.victorySequence;
   const focusProgress = sequence ? Math.min(1, sequence.time / .55) : 0;
-  const focusX = sequence && game.bossDemise ? game.player.x + (game.bossDemise.x - game.player.x) * .38 * focusProgress : game.player.x;
-  const focusY = sequence && game.bossDemise ? game.player.y + (game.bossDemise.y - game.player.y) * .32 * focusProgress : game.player.y;
-  const zoom = (game.camera?.zoom || 1) * (sequence ? 1 + .045 * focusProgress : 1);
+  const cinematic = game.bossCinematic;
+  const cinematicEnvelope = getBossCinematicEnvelope();
+  const cinematicComfort = preferences.reduceMotion ? .38 : 1;
+  const cinematicBlend = cinematic && game.boss ? cinematicEnvelope * (cinematic.type === "entrance" ? .68 : .36) * cinematicComfort : 0;
+  const focusX = sequence && game.bossDemise ? game.player.x + (game.bossDemise.x - game.player.x) * .38 * focusProgress : game.boss ? game.player.x + (game.boss.x - game.player.x) * cinematicBlend : game.player.x;
+  const focusY = sequence && game.bossDemise ? game.player.y + (game.bossDemise.y - game.player.y) * .32 * focusProgress : game.boss ? game.player.y + (game.boss.y - game.player.y) * cinematicBlend : game.player.y;
+  const zoom = (game.camera?.zoom || 1) * (sequence ? 1 + .045 * focusProgress : 1 + cinematicEnvelope * (preferences.reduceMotion ? .018 : .065));
+  if (cinematic && cinematicEnvelope > .01) {
+    cinematic.cameraRendered = true;
+    cinematic.focusBlend = cinematicBlend;
+    cinematic.screenBossY = H / 2 + (game.boss.y - focusY) * zoom;
+    cinematic.screenPlayerY = H / 2 + (game.player.y - focusY) * zoom;
+  }
   ctx.translate(W / 2, H / 2);
   ctx.scale(zoom, zoom);
   ctx.translate(-focusX, -focusY);
   drawWorldDecor();
   drawOpeningIncursionMarkers();
   for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
+  drawBossCinematicGround();
   for (const wave of game.shockwaves) {
     if (!isWorldPointVisible(wave.x, wave.y, wave.radius + 24)) continue;
     ctx.save();
@@ -8265,6 +8463,12 @@ function drawEnemy(enemy) {
     ? (enemy.type === "ranged" || enemy.type === "caster" ? -.055 : -.12 + windupProgress * .15)
     : enemy.attackRecovery > 0 ? .07 * Math.min(1, enemy.attackRecovery / .18) : 0;
   const bossPose = enemy.type === "boss" ? getBossActionPose(enemy) : { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+  const bossCinematic = enemy.type === "boss" && game.bossCinematic?.bossId === enemy.id ? game.bossCinematic : null;
+  const bossRevealProgress = bossCinematic ? Math.max(0, Math.min(1, bossCinematic.time / Math.max(.01, bossCinematic.duration))) : 1;
+  const bossRevealEase = 1 - Math.pow(1 - Math.min(1, bossRevealProgress * 2.35), 3);
+  const bossRevealEnvelope = bossCinematic ? Math.sin(bossRevealProgress * Math.PI) : 0;
+  const bossRevealScale = bossCinematic?.type === "entrance" ? .7 + bossRevealEase * .3 : 1 + bossRevealEnvelope * .045;
+  const bossRevealY = bossCinematic?.type === "entrance" ? -(1 - bossRevealEase) * s * .68 : -bossRevealEnvelope * s * .08;
   const entryOffset = enemy.openingEntrant ? (1 - openingEase) * 34 : 0;
   const entryAngle = enemy.openingEntryAngle || 0;
   const articulatedPose = isEnemyArticulationEligible(enemy);
@@ -8276,13 +8480,19 @@ function drawEnemy(enemy) {
   }
   ctx.translate(
     enemy.x + Math.cos(entryAngle) * entryOffset + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x + Math.cos(enemy.attackAngle || 0) * wholeBodyLunge,
-    enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y + Math.sin(enemy.attackAngle || 0) * wholeBodyLunge,
+    enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y + bossRevealY + Math.sin(enemy.attackAngle || 0) * wholeBodyLunge,
   );
+  if (bossCinematic?.type === "entrance") ctx.globalAlpha *= .34 + bossRevealEase * .66;
   if (enemy.openingEntrant && openingProgress < 1) ctx.scale(.68 + openingEase * .32, .76 + openingEase * .24);
   const idleRock = articulatedPose ? 0 : Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06);
   const contactRotation = articulatedPose ? 0 : contactPose.facing * (contactPose.impact * .13 - contactPose.charge * .07);
   ctx.rotate(idleRock + attackLean * (articulatedPose ? .12 : .42) + contactRotation + reactionRotate * reactionMotion + bossPose.rotation);
-  ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY);
+  ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX * bossRevealScale, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY * bossRevealScale);
+  if (bossCinematic) bossCinematic.bossRendered = true;
+  if (bossCinematic && !LOW_POWER_DEVICE) {
+    ctx.shadowColor = getBossSignature().color;
+    ctx.shadowBlur = 9 + bossRevealEnvelope * 8;
+  }
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (enemy.type === "boss" && enemy.bossReaction > 0) {
     const reaction = Math.min(1, enemy.bossReaction / .32);
@@ -8301,6 +8511,7 @@ function drawEnemy(enemy) {
     if (game.scene.id === "mars") drawMartianEnemy(enemy, s, frozen);
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
+  if (bossCinematic) ctx.shadowBlur = 0;
   drawEnemyMeleeActionLayer(enemy, s);
   drawEnemyHitReactionLayer(enemy, s, reactionPulse);
   drawBossDamageState(enemy, s, "front");
@@ -11367,6 +11578,19 @@ if (QA_MODE) {
         damageMode: getBossDamageProfile().mode,
         damageLabel: getBossDamageProfile().label,
         damageRendered: Boolean(game.boss.bossDamageRendered && game.boss.bossDamageBackRendered && game.boss.bossDamageFrontRendered),
+      } : null,
+      bossCinematic: game.bossCinematic ? {
+        type: game.bossCinematic.type,
+        phase: game.bossCinematic.phase,
+        theme: game.bossCinematic.theme,
+        motif: game.bossCinematic.motif,
+        progress: Number((game.bossCinematic.time / Math.max(.01, game.bossCinematic.duration)).toFixed(2)),
+        cameraRendered: Boolean(game.bossCinematic.cameraRendered),
+        overlayRendered: Boolean(game.bossCinematic.overlayRendered),
+        motifRendered: Boolean(game.bossCinematic.motifRendered),
+        groundRendered: Boolean(game.bossCinematic.groundRendered),
+        bossRendered: Boolean(game.bossCinematic.bossRendered),
+        focusBlend: Number((game.bossCinematic.focusBlend || 0).toFixed(2)),
       } : null,
       victorySequence: game.victorySequence ? {
         stage: game.victorySequence.stage,
