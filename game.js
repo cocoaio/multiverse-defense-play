@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "84";
+const ASSET_REVISION = "85";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -170,6 +170,13 @@ function setHeroElementSprite(element, sceneId, classId) {
   if (!element) return;
   const path = `./assets/characters/${sceneId}/${classId}.png`;
   element.classList.add("hero-single-sprite");
+  element.dataset.classId = classId;
+  element.style.backgroundImage = `url("${getResolvedAssetUrl(path)}")`;
+}
+
+function setSystemCardPortrait(element, sceneId, classId) {
+  if (!element) return;
+  const path = `./assets/characters/${sceneId}/${classId}.png`;
   element.dataset.classId = classId;
   element.style.backgroundImage = `url("${getResolvedAssetUrl(path)}")`;
 }
@@ -423,6 +430,7 @@ const ui = {
   accountLevel: $("#accountLevelText"),
   accountTitle: $("#accountTitleText"),
   accountProgress: $("#accountProgressFill"),
+  profilePortrait: $("#profilePortrait"),
   lobbyChapter: $("#lobbyChapterText"),
   lobbyMission: $("#lobbyMissionText"),
   lobbyProgress: $("#lobbyProgressText"),
@@ -446,10 +454,15 @@ const ui = {
   retentionTitle: $("#retentionTitle"),
   retentionContent: $("#retentionContent"),
   dailyRailBadge: $("#dailyRailBadge"),
+  dailyRailAlert: $("#dailyRailAlert"),
   eventRailBadge: $("#eventRailBadge"),
+  eventRailAlert: $("#eventRailAlert"),
   dungeonRailBadge: $("#dungeonRailBadge"),
+  dungeonRailAlert: $("#dungeonRailAlert"),
   petDungeonRailBadge: $("#petDungeonRailBadge"),
+  petDungeonRailAlert: $("#petDungeonRailAlert"),
   skinRailBadge: $("#skinRailBadge"),
+  skinRailAlert: $("#skinRailAlert"),
   petDungeonShortcut: $("#petDungeonShortcut"),
   loadoutModal: $("#loadoutModal"),
   classChoices: $("#classChoices"),
@@ -599,6 +612,18 @@ const scenes = [
     palette: ["#67b98c", "#e8d27c", "#698f83", "#a878d0", "#d495bd", "#b7594d"],
   },
 ];
+
+// The command centre remembers a fitting operator for every world instead of
+// forcing one global (usually melee) poster onto all seven themes.
+const sceneDefaultClasses = {
+  city: "ranger",
+  snow: "melee",
+  hospital: "ranger",
+  orbit: "melee",
+  mars: "ranger",
+  moon: "mage",
+  cultivation: "ranger",
+};
 
 // Enemies do not share a recolored projectile set. Each battlefield has its
 // own silhouette, motion and on-hit language so a player can identify danger
@@ -994,6 +1019,7 @@ const defaultMeta = {
   currentScene: 0,
   currentLevel: 1,
   selectedClass: "ranger",
+  sceneClasses: { ...sceneDefaultClasses },
   equipment: [],
   classGear: Object.fromEntries(classDefinitions.map((entry) => [entry.id, Object.fromEntries(gearSlots.map((slot) => [slot, null]))])),
   divineGear: Object.fromEntries(classDefinitions.map((entry) => [entry.id, { unlocked: false, level: 1, trialRuns: 0, trialStages: [] }])),
@@ -1017,6 +1043,7 @@ function loadMeta() {
       ...saved,
       upgrades: { ...defaultMeta.upgrades, ...(saved?.upgrades || {}) },
       progress: { ...defaultMeta.progress, ...(saved?.progress || {}) },
+      sceneClasses: { ...defaultMeta.sceneClasses, ...(saved?.sceneClasses || {}) },
       equipment: Array.isArray(saved?.equipment) ? saved.equipment : [],
       classGear: Object.fromEntries(classDefinitions.map((entry) => [entry.id, { ...defaultMeta.classGear[entry.id], ...(saved?.classGear?.[entry.id] || {}) }])),
       divineGear: Object.fromEntries(classDefinitions.map((entry) => [entry.id, {
@@ -1088,7 +1115,9 @@ const combatAudioState = {
 };
 let adTimer = null;
 let pendingAdReward = null;
-let selectedRunClass = meta.selectedClass || "ranger";
+let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
+let selectedLevel = Math.max(1, Math.min(LEVELS_PER_SCENE, meta.currentLevel || 1));
+let selectedRunClass = meta.sceneClasses?.[scenes[selectedSceneIndex].id] || sceneDefaultClasses[scenes[selectedSceneIndex].id] || meta.selectedClass || "ranger";
 let pendingRunType = "main";
 let pendingPetEntryKind = null;
 let assetLaunchPending = false;
@@ -1105,8 +1134,14 @@ const pointerMove = {
   touchMode: false,
   lastInputAt: 0,
 };
-let selectedSceneIndex = Math.max(0, Math.min(scenes.length - 1, meta.currentScene || 0));
-let selectedLevel = Math.max(1, Math.min(LEVELS_PER_SCENE, meta.currentLevel || 1));
+
+function rememberSceneClass(classId, sceneId = scenes[selectedSceneIndex].id) {
+  if (!heroClassIds.includes(classId)) return;
+  selectedRunClass = classId;
+  meta.selectedClass = classId;
+  meta.sceneClasses ||= { ...sceneDefaultClasses };
+  meta.sceneClasses[sceneId] = classId;
+}
 
 function clearTutorialFocus() {
   document.querySelectorAll(".tutorial-focus").forEach((element) => element.classList.remove("tutorial-focus"));
@@ -2219,7 +2254,7 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   ui.loadoutModal.classList.remove("asset-loading");
   if (!assetsReady) showToast("部分素材仍在加载，已启用兼容占位并后台重试");
   unlockAudio();
-  selectedRunClass = classId;
+  rememberSceneClass(classId);
   if (!showcase) lastRunType = runType;
   if (runType === "resource") {
     if (meta.dungeon.entries <= 0) { showToast("今日丰饶之境次数已用完"); return; }
@@ -2231,7 +2266,6 @@ async function startGame(classId = selectedRunClass, runType = pendingRunType) {
   }
   if (!QA_MODE && !ADMIN_MODE && !showcase) meta.energy.current -= energyCost;
   if (!showcase) {
-    meta.selectedClass = classId;
     saveMeta();
   }
   ui.loadoutModal.classList.add("hidden");
@@ -5052,7 +5086,7 @@ function renderArmoryAvatarPreview() {
     const themedEntry = getSceneClassProfile(scene, entry.id);
     const button = document.createElement("button"); button.className = entry.id === selectedRunClass ? "active" : "";
     button.textContent = themedEntry.short;
-    button.addEventListener("click", () => { selectedRunClass = entry.id; meta.selectedClass = entry.id; saveMeta(); renderArmory(); renderCommandCenter(); });
+    button.addEventListener("click", () => { rememberSceneClass(entry.id); saveMeta(); renderArmory(); renderCommandCenter(); renderCommandSidebar(); });
     ui.wardrobeClassSwitch.append(button);
   }
 }
@@ -5161,16 +5195,43 @@ function renderCommandSidebar() {
   const claimable = dailyTaskDefinitions.filter((task) => task.value() >= task.target && !meta.daily.claimed[task.id]).length;
   ui.dailyRailBadge.textContent = `${complete}/4`;
   ui.dailyRailBadge.classList.toggle("ready", claimable > 0);
-  const eventReady = !meta.activities.signIn || (!meta.activities.dungeonGift && meta.dungeon.clears > 0);
-  ui.eventRailBadge.textContent = eventReady ? "可领取" : "进行中";
+  ui.dailyRailAlert.textContent = String(Math.max(1, claimable));
+  ui.dailyRailAlert.classList.toggle("hidden", claimable <= 0);
+  const eventReadyCount = Number(!meta.activities.signIn)
+    + Number(!meta.activities.gearAd)
+    + Number(!meta.skins.owned.includes("jade_avatar"))
+    + Number(!meta.activities.dungeonGift && meta.dungeon.clears > 0);
+  const eventReady = eventReadyCount > 0;
+  ui.eventRailBadge.textContent = eventReady ? `${eventReadyCount} 项` : "进行中";
   ui.eventRailBadge.classList.toggle("ready", eventReady);
+  ui.eventRailAlert.textContent = String(eventReadyCount);
+  ui.eventRailAlert.classList.toggle("hidden", !eventReady);
   ui.dungeonRailBadge.textContent = `${meta.dungeon.entries}/3`;
+  ui.dungeonRailAlert.textContent = String(meta.dungeon.entries);
+  ui.dungeonRailAlert.classList.toggle("hidden", meta.dungeon.entries <= 0);
   if (ui.petDungeonRailBadge) {
     ui.petDungeonRailBadge.textContent = !meta.pet.unlocked ? "第三章" : meta.petDungeon.freeEntries > 0 ? "免费 1 次" : meta.petDungeon.adEntries > 0 ? "广告进入" : "明日刷新";
     ui.petDungeonRailBadge.classList.toggle("ready", meta.pet.unlocked && meta.petDungeon.freeEntries > 0);
+    ui.petDungeonRailAlert.textContent = "1";
+    ui.petDungeonRailAlert.classList.toggle("hidden", !meta.pet.unlocked || meta.petDungeon.freeEntries <= 0);
   }
   ui.skinRailBadge.textContent = meta.skins.owned.includes("jade_avatar") ? "颜色已领" : "免费颜色";
   ui.skinRailBadge.classList.toggle("ready", !meta.skins.owned.includes("jade_avatar"));
+  ui.skinRailAlert.classList.toggle("hidden", meta.skins.owned.includes("jade_avatar"));
+
+  const statusCopy = [
+    ["daily", claimable ? `${claimable} 份奖励待领取` : `今日进度 ${complete}/4`],
+    ["events", eventReady ? `${eventReadyCount} 项活动可处理` : "今日活动进行中"],
+    ["dungeon", meta.dungeon.entries ? `今日剩余 ${meta.dungeon.entries} 次` : "今日次数已用完"],
+    ["petDungeon", !meta.pet.unlocked ? "第三章通关后开放" : meta.petDungeon.freeEntries ? "免费机会等待挑战" : "试炼入口已开放"],
+    ["skins", meta.skins.owned.includes("jade_avatar") ? "试演终极技能外观" : "免费外观等待解锁"],
+  ];
+  for (const [panel, copy] of statusCopy) {
+    const card = document.querySelector(`[data-retention-panel="${panel}"]`);
+    const small = card?.querySelector(".system-card-copy small");
+    if (small) small.textContent = copy;
+    if (card) card.setAttribute("aria-label", `${card.querySelector(".system-card-copy b")?.textContent || panel}，${copy}`);
+  }
 }
 
 function retentionItem({ icon, color = "var(--acid)", name, detail, progress, action, label, disabled = false, secondary = false, swatch = null, previewAction = null, selectedPreview = false }) {
@@ -5382,6 +5443,8 @@ function renderCommandCenter() {
   const nextLevel = scene.endless ? "无尽修行" : getLevelModifier(selectedLevel).name;
   setHeroElementSprite(ui.lobbyHero, scene.id, selectedRunClass);
   setHeroElementSprite(ui.sceneHero, scene.id, selectedRunClass);
+  setHeroElementSprite(ui.profilePortrait, scene.id, selectedRunClass);
+  document.querySelectorAll("[data-system-portrait]").forEach((portrait) => setSystemCardPortrait(portrait, scene.id, portrait.dataset.systemPortrait));
   ui.lobbyChapter.textContent = `${scene.chapter} · ${scene.name}`;
   ui.lobbyMission.textContent = isSceneUnlocked(selectedSceneIndex) ? `待命：${nextLevel}` : "战区入口受限";
   ui.lobbyProgress.textContent = scene.endless ? "六大修行地域循环 · 首领无限轮换" : `区域攻略 ${cleared} / ${LEVELS_PER_SCENE}`;
@@ -5438,6 +5501,7 @@ function renderSceneMap() {
 function selectScene(index) {
   if (index < 0 || index >= scenes.length) return;
   selectedSceneIndex = index;
+  selectedRunClass = meta.sceneClasses?.[scenes[index].id] || sceneDefaultClasses[scenes[index].id] || "ranger";
   const cleared = meta.progress[scenes[index].id];
   selectedLevel = isSceneUnlocked(index) ? Math.min(LEVELS_PER_SCENE, cleared + 1) : 1;
   if (isSceneUnlocked(index) && !QA_MODE) {

@@ -1740,3 +1740,186 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* v85: command systems are real, stateful cards; every hero uses one isolated sprite. */
+.commander-profile .profile-portrait {
+  display:block;
+  overflow:hidden;
+  background-repeat:no-repeat;
+  filter:drop-shadow(0 5px 7px rgba(0,0,0,.55));
+}
+.profile-portrait.hero-single-sprite[data-class-id] {
+  background-size:158% auto!important;
+  background-position:center 13%!important;
+}
+.command-panel { padding-right:96px; }
+.command-sidebar { width:88px;top:8px;gap:7px; }
+.command-sidebar .system-card {
+  position:relative;
+  isolation:isolate;
+  min-height:88px;
+  display:block;
+  overflow:hidden;
+  padding:9px 7px 8px;
+  border:1px solid color-mix(in srgb,var(--acid) 26%,rgba(255,255,255,.09));
+  border-radius:15px;
+  text-align:left;
+  background:
+    radial-gradient(circle at 84% 22%,color-mix(in srgb,var(--acid) 19%,transparent),transparent 36%),
+    linear-gradient(155deg,color-mix(in srgb,var(--acid) 10%,rgba(12,34,36,.94)),rgba(2,10,13,.98) 67%);
+  box-shadow:inset 0 1px rgba(255,255,255,.07),inset 0 -19px 28px rgba(0,0,0,.23),0 10px 25px rgba(0,0,0,.35);
+}
+.command-sidebar .system-card::before {
+  content:"";
+  position:absolute;
+  z-index:-1;
+  inset:auto 0 0;
+  height:54%;
+  background:linear-gradient(transparent,rgba(1,8,10,.94));
+}
+.command-sidebar .system-card::after {
+  content:"";
+  position:absolute;
+  z-index:4;
+  left:7px;
+  right:7px;
+  bottom:0;
+  height:1px;
+  background:linear-gradient(90deg,var(--acid),transparent);
+  opacity:.72;
+}
+.command-sidebar .system-card:hover { transform:translateX(-3px);border-color:color-mix(in srgb,var(--acid) 61%,transparent);filter:brightness(1.08); }
+.system-card-art {
+  position:absolute;
+  z-index:-2;
+  right:-4px;
+  bottom:10px;
+  width:57px;
+  height:79px;
+  background-repeat:no-repeat;
+  background-size:contain;
+  background-position:right bottom;
+  opacity:.66;
+  filter:saturate(.92) contrast(1.06) drop-shadow(-6px 7px 6px rgba(0,0,0,.58));
+  pointer-events:none;
+}
+.system-card:nth-child(even) .system-card-art { right:-8px;transform:scaleX(-1);opacity:.59; }
+.system-pet-art {
+  background-image:url("./assets/companions-v1.png");
+  background-size:300% auto;
+  background-position:left center;
+  transform:none!important;
+}
+.command-sidebar .system-card > i {
+  position:relative;
+  z-index:2;
+  width:25px;
+  height:25px;
+  display:grid;
+  place-items:center;
+  border:1px solid color-mix(in srgb,var(--acid) 27%,transparent);
+  border-radius:9px;
+  color:#f1fff7;
+  background:color-mix(in srgb,var(--acid) 14%,rgba(2,12,14,.76));
+  font-size:11px;
+  font-style:normal;
+  text-shadow:0 0 10px var(--acid);
+  box-shadow:0 5px 13px rgba(0,0,0,.28),inset 0 0 12px color-mix(in srgb,var(--acid) 9%,transparent);
+}
+.system-card-copy {
+  position:absolute;
+  z-index:3;
+  left:7px;
+  right:5px;
+  bottom:9px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start!important;
+  gap:2px!important;
+  text-shadow:0 2px 6px #000;
+}
+.command-sidebar .system-card .system-card-copy b { color:#f4fff9;font-size:8px;font-weight:950;white-space:nowrap; }
+.command-sidebar .system-card .system-card-copy small { max-width:74px;overflow:hidden;color:#92aaa2;font-size:5.5px;font-weight:760;line-height:1.25;text-overflow:ellipsis;white-space:nowrap; }
+.command-sidebar .system-card > em {
+  position:absolute;
+  z-index:3;
+  top:10px;
+  right:7px;
+  max-width:49px;
+  padding:3px 5px;
+  border:1px solid color-mix(in srgb,var(--acid) 18%,transparent);
+  border-radius:8px;
+  color:color-mix(in srgb,var(--acid) 78%,white);
+  background:rgba(2,10,12,.7);
+  font-size:5.5px;
+  font-style:normal;
+  font-weight:900;
+}
+.command-sidebar .system-card > em.ready { color:#231a06;border-color:#ffe382;background:#f2ce64;box-shadow:0 0 14px rgba(242,206,100,.3); }
+.system-alert {
+  position:absolute;
+  z-index:8;
+  top:3px;
+  right:3px;
+  min-width:15px;
+  height:15px;
+  display:grid;
+  place-items:center;
+  padding:0 4px;
+  border:1.5px solid #fff2ee;
+  border-radius:10px;
+  color:#fff;
+  background:#ff3f35;
+  box-shadow:0 0 0 2px rgba(64,6,4,.58),0 0 12px rgba(255,57,47,.72);
+  font-size:7px;
+  font-style:normal;
+  font-weight:1000;
+  line-height:1;
+  text-decoration:none;
+  animation:systemAlertPulse 1.7s ease-in-out infinite;
+}
+.system-alert.hidden { display:none; }
+.system-card.compact { min-height:72px; }
+.system-card.compact .system-card-art { height:67px;opacity:.48; }
+
+#app[data-scene] #lobbyHero.hero-single-sprite[data-class-id] {
+  top:auto;
+  left:62%;
+  bottom:47px;
+  width:min(var(--lobby-hero-w,190px),72%);
+  height:calc(100% - 76px);
+  transform:translateX(-50%);
+  background-size:contain!important;
+  background-position:center bottom!important;
+  animation:lobbyCharacterBreath 3.7s ease-in-out infinite;
+}
+.scene-hero.hero-single-sprite[data-class-id] {
+  background-size:contain!important;
+  background-position:center bottom!important;
+}
+.lobby-mission {
+  z-index:5;
+  width:min(202px,74%);
+  min-width:0;
+  padding:10px 12px 11px;
+  background:linear-gradient(90deg,rgba(2,10,13,.94),rgba(2,10,13,.73) 76%,rgba(2,10,13,.1));
+  box-shadow:-8px 10px 25px rgba(0,0,0,.2);
+}
+.lobby-mission strong,.lobby-mission span { position:relative;z-index:1;max-width:100%; }
+.lobby-loadout { z-index:6;max-width:118px; }
+@keyframes systemAlertPulse { 50% { transform:scale(1.1);filter:brightness(1.18); } }
+@keyframes lobbyCharacterBreath { 50% { transform:translateX(-50%) translateY(-2px) scale(1.008);filter:drop-shadow(0 23px 19px rgba(0,0,0,.75)) drop-shadow(0 0 15px color-mix(in srgb,var(--cyan) 19%,transparent)); } }
+
+.low-power-device .system-alert,.low-power-device #lobbyHero.hero-single-sprite { animation:none!important; }
+
+@media (max-height:720px) {
+  .command-panel { padding-right:88px; }
+  .command-sidebar { width:80px;gap:5px; }
+  .command-sidebar .system-card { min-height:68px;padding:6px; }
+  .command-sidebar .system-card.compact { min-height:59px; }
+  .system-card-art { width:48px;height:60px;bottom:7px; }
+  .system-card.compact .system-card-art { height:53px; }
+  .system-card-copy { left:6px;bottom:6px; }
+  .command-sidebar .system-card .system-card-copy small { max-width:66px; }
+  #app[data-scene] #lobbyHero.hero-single-sprite[data-class-id] { bottom:44px;height:calc(100% - 68px); }
+}
