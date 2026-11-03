@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "89";
+const ASSET_REVISION = "90";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -4970,7 +4970,7 @@ function renderMeta() {
   ui.clearedLevels.textContent = totalCleared;
   const accountLevel = Math.max(1, 1 + Math.floor(totalCleared / 2));
   ui.wins.textContent = accountLevel;
-  ui.bankCoins.textContent = meta.coins;
+  ui.bankCoins.textContent = ADMIN_MODE ? "∞" : meta.coins;
   ui.unlockedScenes.textContent = `${unlockedCount}/${scenes.length}`;
   ui.accountLevel.textContent = `LV.${accountLevel}`;
   ui.accountTitle.textContent = accountLevel >= 30 ? "多元防线统帅" : accountLevel >= 18 ? "跨界先锋" : accountLevel >= 8 ? "资深守卫者" : "新晋守卫者";
@@ -5002,6 +5002,17 @@ function formatSupplyCost(value) {
   if (value >= 1e8) return `${(value / 1e8).toFixed(1)}亿`;
   if (value >= 1e4) return `${(value / 1e4).toFixed(1)}万`;
   return String(value);
+}
+
+function canAffordSupply(cost) {
+  return ADMIN_MODE || meta.coins >= cost;
+}
+
+function spendSupply(cost) {
+  if (ADMIN_MODE) return true;
+  if (meta.coins < cost) return false;
+  meta.coins -= cost;
+  return true;
 }
 
 function grantDivineGearUnlock(classId = selectedRunClass) {
@@ -5039,12 +5050,12 @@ function upgradeDivineGear(classId = selectedRunClass) {
   const state = getDivineGearState(classId);
   if (!state.unlocked) return;
   const cost = getDivineGearUpgradeCost(state.level);
-  if (meta.coins < cost) {
+  if (!canAffordSupply(cost)) {
     showToast(`神装强化还差 ${formatSupplyCost(cost - meta.coins)} 补给币`);
     return;
   }
   const before = getCombatPower(classId);
-  meta.coins -= cost;
+  spendSupply(cost);
   state.level += 1;
   saveMeta();
   renderHome();
@@ -5064,7 +5075,7 @@ function renderDivineGearCard() {
   if (state.unlocked) {
     const cost = getDivineGearUpgradeCost(level);
     ui.divineGearCard.className = "divine-gear-card unlocked";
-    ui.divineGearCard.innerHTML = `<span class="divine-gear-icon">${definition.icon}</span><span class="divine-gear-copy"><small>已永久解锁 · 无限成长神装</small><b>${definition.name} · ${level} 阶</b><p>伤害 +${Math.round(stats.damage * 100)}% · 生命 +${stats.health} · 暴击 +${(stats.crit * 100).toFixed(1)}%<br>推荐支撑至第 ${stats.supportedChapter} 章；${syncNote}</p></span><button>强化<br><small>◆${formatSupplyCost(cost)}</small></button>`;
+    ui.divineGearCard.innerHTML = `<span class="divine-gear-icon">${definition.icon}</span><span class="divine-gear-copy"><small>已永久解锁 · 无限成长神装</small><b>${definition.name} · ${level} 阶</b><p>伤害 +${Math.round(stats.damage * 100)}% · 生命 +${stats.health} · 暴击 +${(stats.crit * 100).toFixed(1)}%<br>推荐支撑至第 ${stats.supportedChapter} 章；${syncNote}</p></span><button>强化<br><small>${ADMIN_MODE ? "管理员免费" : `◆${formatSupplyCost(cost)}`}</small></button>`;
     ui.divineGearCard.querySelector("button").addEventListener("click", () => upgradeDivineGear(classId));
   } else {
     const ready = state.trialRuns >= 2;
@@ -5144,7 +5155,7 @@ function renderArmory() {
       const row = document.createElement("div");
       row.className = `gear-item${equipped ? " equipped" : ""}`;
       row.style.setProperty("--rarity", rarity.color);
-      row.innerHTML = `<span class="gear-item-icon">${item.icon}</span><span><b>${item.name} ${level ? `+${level}` : ""}</b><small>${formatGearStat(item)} · ${level >= 10 ? "强化已满" : `强化 ◆${upgradeCost}`}</small></span><span class="gear-item-actions"><button ${level >= 10 ? "disabled" : ""}>强化</button><button>${equipped ? "卸下" : "装备"}</button></span>`;
+      row.innerHTML = `<span class="gear-item-icon">${item.icon}</span><span><b>${item.name} ${level ? `+${level}` : ""}</b><small>${formatGearStat(item)} · ${level >= 10 ? "强化已满" : ADMIN_MODE ? "强化 · 管理员免费" : `强化 ◆${upgradeCost}`}</small></span><span class="gear-item-actions"><button ${level >= 10 ? "disabled" : ""}>强化</button><button>${equipped ? "卸下" : "装备"}</button></span>`;
       const [upgradeButton, equipButton] = row.querySelectorAll("button");
       upgradeButton.addEventListener("click", () => upgradeGear(item));
       equipButton.addEventListener("click", () => toggleGear(item));
@@ -5217,9 +5228,9 @@ function upgradeGear(item) {
   const level = item.level || 0;
   if (level >= 10) return;
   const cost = getGearUpgradeCost(item);
-  if (meta.coins < cost) { showToast(`强化还差 ${cost - meta.coins} 枚补给币`); return; }
+  if (!canAffordSupply(cost)) { showToast(`强化还差 ${cost - meta.coins} 枚补给币`); return; }
   const beforePower = getCombatPower(item.classId);
-  meta.coins -= cost;
+  spendSupply(cost);
   item.level = level + 1;
   saveMeta();
   renderHome();
@@ -5493,7 +5504,7 @@ function handleRetentionAction(action) {
   } else if (type === "skin") {
     const skin = skinDefinitions.find((entry) => entry.id === id); if (!skin) return;
     if (meta.skins.owned.includes(id)) meta.skins.equipped = id;
-    else if (skin.price != null && meta.coins >= skin.price) { meta.coins -= skin.price; meta.skins.owned.push(id); meta.skins.equipped = id; }
+    else if (skin.price != null && canAffordSupply(skin.price)) { spendSupply(skin.price); meta.skins.owned.push(id); meta.skins.equipped = id; }
     else { showToast(skin.price == null ? "请从活动中心免费解锁" : `还差 ◆${Math.max(0, skin.price - meta.coins)}`); return; }
     selectedSkinPreviewId = skin.id;
     saveMeta(); renderSkinsPanel(); renderHome(); showToast(`已装备 ${skin.name}`);
@@ -5682,12 +5693,12 @@ function buyMetaUpgrade(definition) {
   const level = meta.upgrades[definition.id];
   if (level >= definition.costs.length) return;
   const cost = definition.costs[level];
-  if (meta.coins < cost) {
+  if (!canAffordSupply(cost)) {
     showToast(`还差 ${cost - meta.coins} 枚补给币`);
     tone(130, 0.08, "square", 0.025, 0.8);
     return;
   }
-  meta.coins -= cost;
+  spendSupply(cost);
   meta.upgrades[definition.id] += 1;
   saveMeta();
   renderHome();
