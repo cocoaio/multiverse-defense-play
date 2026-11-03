@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "83";
+const ASSET_REVISION = "84";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -624,13 +624,13 @@ const bossPhaseThemes = {
 };
 
 const bossSignatureProfiles = {
-  city: { type: "mutantClaws", action: "暴君裂地", color: "#ff654f" },
-  snow: { type: "glacierFists", action: "冰拳震原", color: "#d9fbff" },
-  hospital: { type: "viralTendrils", action: "毒株增殖", color: "#8dffd3" },
-  orbit: { type: "carrierCannons", action: "母舰齐射", color: "#8cecff" },
-  mars: { type: "magmaHammer", action: "熔岩战槌", color: "#ff9b58" },
-  moon: { type: "gravityArms", action: "泰坦引力臂", color: "#d9d5ff" },
-  cultivation: { type: "swordHalo", action: "宗主剑轮", color: "#d8ffe0" },
+  city: { type: "mutantClaws", action: "暴君裂地", color: "#ff654f", motion: "pounce" },
+  snow: { type: "glacierFists", action: "冰拳震原", color: "#d9fbff", motion: "doubleSlam" },
+  hospital: { type: "viralTendrils", action: "毒株增殖", color: "#8dffd3", motion: "bloom" },
+  orbit: { type: "carrierCannons", action: "母舰齐射", color: "#8cecff", motion: "broadside" },
+  mars: { type: "magmaHammer", action: "熔岩战槌", color: "#ff9b58", motion: "hammerFall" },
+  moon: { type: "gravityArms", action: "泰坦引力臂", color: "#d9d5ff", motion: "gravityPress" },
+  cultivation: { type: "swordHalo", action: "宗主剑轮", color: "#d8ffe0", motion: "swordCommand" },
 };
 
 const bossDefeatProfiles = {
@@ -2992,6 +2992,8 @@ function spawnEnemy(type, x, y, forcedAngle) {
     bossPhase: type === "boss" ? 1 : 0,
     phaseTransition: 0,
     bossActionAnim: 0,
+    bossActionDuration: 0,
+    bossActionImpactDelay: 0,
     bossReaction: 0,
     bossReactionSide: 1,
     bossDamageStage: 0,
@@ -3603,6 +3605,8 @@ function triggerCinematicImpact(x, y, color, intensity = 1, duration = .78) {
     x,
     y,
     color,
+    sceneId: game.scene.id,
+    motif: getBossImpactSpec(game.scene.id).telegraph,
     intensity: Math.max(.35, Math.min(1.45, intensity)),
     time: duration,
     maxTime: duration,
@@ -3761,13 +3765,15 @@ function updateEnemies(dt) {
     }
     if (enemy.type === "boss" && enemy.skillTimer <= 0 && enemy.attackWindup <= 0 && playerDistance < 430) {
       const phase = enemy.bossPhase || 1;
-      enemy.bossActionAnim = 1.25;
       enemy.skillTimer = phase === 3 ? rand(3.45, 4.2) : phase === 2 ? rand(4, 5.05) : rand(4.8, 6.4);
       enemy.bossSkillIndex = (enemy.bossSkillIndex || 0) + 1;
       const radius = (game.scene.endless ? 118 : game.scene.id === "hospital" ? 104 : 112) + (phase - 1) * 9;
       const lead = Math.min(42, Math.hypot(game.move.x, game.move.y) * 38);
       const impact = getBossImpactSpec();
       const delay = phase === 3 ? .94 : phase === 2 ? 1.05 : 1.18;
+      enemy.bossActionDuration = delay + .46;
+      enemy.bossActionImpactDelay = delay;
+      enemy.bossActionAnim = enemy.bossActionDuration;
       const damage = Math.max(50, Math.round(enemy.damage * (1.55 + phase * .1)));
       const targetX = game.player.x + game.move.x * lead;
       const targetY = game.player.y + game.move.y * lead;
@@ -5762,9 +5768,21 @@ function drawCinematicImpactOverlay() {
     ctx.beginPath(); ctx.moveTo(18, -1.5); ctx.lineTo(length, -8); ctx.lineTo(length, 8); ctx.lineTo(18, 1.5); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
+  const themedMark = {
+    radius: 24 + progress * 330,
+    telegraph: impact.motif || getBossImpactSpec(impact.sceneId).telegraph,
+    sceneId: impact.sceneId,
+    sourceId: 777,
+    color: impact.color,
+  };
+  drawBossDangerMotif(themedMark, Math.min(1, progress * 1.8));
   ctx.strokeStyle = colorAlpha("#ffffff", .72 * strength);
   ctx.lineWidth = 2 + strength * 8;
-  ctx.beginPath(); ctx.arc(0, 0, 24 + progress * 330, 0, Math.PI * 2); ctx.stroke();
+  traceBossDangerShape(themedMark); ctx.stroke();
+  ctx.strokeStyle = colorAlpha(impact.color, .44 * strength);
+  ctx.lineWidth = 1.5 + strength * 3;
+  traceBossDangerShape(themedMark, .72); ctx.stroke();
+  impact.themeMarkRendered = true;
   ctx.restore();
 }
 
@@ -7294,13 +7312,38 @@ function drawBossPhaseAura(enemy, s) {
   ctx.restore();
 }
 
+function getBossActionPose(enemy) {
+  const duration = Math.max(.001, enemy?.bossActionDuration || 0);
+  const remaining = Math.max(0, enemy?.bossActionAnim || 0);
+  if (!remaining || !duration) return { stage: "idle", progress: 0, charge: 0, strike: 0, impact: 0, recovery: 1, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+  const elapsed = Math.max(0, duration - remaining);
+  const impactAt = Math.min(duration - .08, Math.max(.12, enemy.bossActionImpactDelay || duration * .72));
+  const chargeRaw = Math.max(0, Math.min(1, elapsed / impactAt));
+  const charge = chargeRaw * chargeRaw * (3 - 2 * chargeRaw);
+  const recovery = Math.max(0, Math.min(1, (elapsed - impactAt) / Math.max(.12, duration - impactAt)));
+  const impact = elapsed < impactAt ? 0 : Math.sin(Math.min(1, (elapsed - impactAt) / .2) * Math.PI);
+  const strike = elapsed < impactAt ? charge * .94 : Math.max(0, 1 - recovery);
+  const stage = elapsed < impactAt * .78 ? "windup" : elapsed < impactAt ? "locked" : recovery < .34 ? "impact" : "recovery";
+  const motion = getBossSignature(enemy.sceneId || game?.scene?.id).motion;
+  let x = 0; let y = 0; let rotation = 0; let scaleX = 1; let scaleY = 1;
+  if (motion === "pounce") { y = -charge * 7 + impact * 15; rotation = -charge * .07 + impact * .1; scaleX += impact * .12; scaleY -= impact * .1; }
+  else if (motion === "doubleSlam") { y = -charge * 9 + impact * 18; scaleX += impact * .16; scaleY -= impact * .14; }
+  else if (motion === "bloom") { y = -charge * 5; rotation = charge * .06 - recovery * .06; scaleX += charge * .08 + impact * .09; scaleY += charge * .08 - impact * .06; }
+  else if (motion === "broadside") { x = Math.sin(elapsed * 9) * charge * 2.5; y = -charge * 4; scaleX += charge * .14; scaleY -= charge * .04; }
+  else if (motion === "hammerFall") { y = -charge * 10 + impact * 19; rotation = charge * -.11 + impact * .16; scaleX += impact * .14; scaleY -= impact * .13; }
+  else if (motion === "gravityPress") { y = charge * 5 + impact * 10; scaleX += charge * .1 + impact * .08; scaleY -= charge * .07 + impact * .08; }
+  else if (motion === "swordCommand") { y = -charge * 12 + impact * 8; rotation = Math.sin(elapsed * 8) * charge * .025; scaleX += impact * .06; scaleY += charge * .05 - impact * .05; }
+  const comfort = preferences.reduceMotion ? .28 : 1;
+  return { stage, progress: elapsed / duration, charge, strike, impact, recovery, x: x * comfort, y: y * comfort, rotation: rotation * comfort, scaleX: 1 + (scaleX - 1) * comfort, scaleY: 1 + (scaleY - 1) * comfort };
+}
+
 function drawBossSignatureLayer(enemy, s, pass) {
   if (enemy.type !== "boss") return;
   const profile = getBossSignature();
   const phase = enemy.bossPhase || 1;
   const active = enemy.bossActionAnim > 0;
-  const progress = active ? 1 - enemy.bossActionAnim / 1.25 : 0;
-  const strike = active ? Math.sin(Math.min(1, progress) * Math.PI) : Math.sin(ambienceTime * 2.1 + enemy.sway) * .08;
+  const actionPose = getBossActionPose(enemy);
+  const strike = active ? actionPose.strike : Math.sin(ambienceTime * 2.1 + enemy.sway) * .08;
   const breathe = Math.sin(ambienceTime * 2.4 + enemy.sway) * s * .035;
   ctx.save();
   ctx.globalAlpha = .76 + phase * .07;
@@ -7481,9 +7524,10 @@ function drawEnemy(enemy) {
   const attackLean = enemy.attackWindup > 0
     ? (enemy.type === "ranged" || enemy.type === "caster" ? -.055 : -.12 + windupProgress * .15)
     : enemy.attackRecovery > 0 ? .07 * Math.min(1, enemy.attackRecovery / .18) : 0;
-  ctx.translate(enemy.x + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion, enemy.y + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion);
-  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean + reactionRotate * reactionMotion);
-  ctx.scale(1 + (reactionScaleX - 1) * reactionMotion, 1 + (reactionScaleY - 1) * reactionMotion);
+  const bossPose = enemy.type === "boss" ? getBossActionPose(enemy) : { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+  ctx.translate(enemy.x + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x, enemy.y + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y);
+  ctx.rotate(Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06) + attackLean + reactionRotate * reactionMotion + bossPose.rotation);
+  ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (enemy.type === "boss" && enemy.bossReaction > 0) {
     const reaction = Math.min(1, enemy.bossReaction / .32);
@@ -10344,6 +10388,9 @@ if (QA_MODE) {
         signature: getBossSignature().type,
         actionName: getBossSignature().action,
         action: Number((game.boss.bossActionAnim || 0).toFixed(2)),
+        actionMotion: getBossSignature().motion,
+        actionPose: getBossActionPose(game.boss).stage,
+        actionProgress: Number(getBossActionPose(game.boss).progress.toFixed(2)),
         reaction: Number((game.boss.bossReaction || 0).toFixed(2)),
         overlayRendered: Boolean(game.bossPhaseOverlayRendered),
         damageStage: game.boss.bossDamageStage || 0,
@@ -10441,6 +10488,7 @@ if (QA_MODE) {
       accessibilityFx: {
         reduceMotion: preferences.reduceMotion,
         impactIntensity: game.cinematicImpact ? Number(game.cinematicImpact.intensity.toFixed(2)) : 0,
+        impactThemeMark: Boolean(game.cinematicImpact?.themeMarkRendered),
         bossShock: Number(game.bossShock.toFixed(2)),
         renderedShake: preferences.reduceMotion ? 0 : Number(game.shake.toFixed(2)),
       },
