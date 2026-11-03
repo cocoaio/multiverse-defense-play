@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "88";
+const ASSET_REVISION = "89";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -2179,6 +2179,10 @@ function makeGame(runType = "main") {
       aimAngle: -Math.PI / 2,
       muzzle: 0,
       attackAnim: 0,
+      attackSequence: 0,
+      attackPoseRendered: false,
+      attackFootPlantRendered: false,
+      attackStageRendered: "idle",
       walkPhase: 0,
       lastFootstepPhase: 0,
       blockedPulse: 0,
@@ -3321,6 +3325,10 @@ function shoot() {
   player.aimAngle = baseAngle;
   player.muzzle = 1;
   player.attackAnim = 1;
+  player.attackSequence = (player.attackSequence || 0) + 1;
+  player.attackPoseRendered = false;
+  player.attackFootPlantRendered = false;
+  player.attackStageRendered = "windup";
   if (game.scene.id === "orbit" && player.combatClass.id === "melee" && player.derivedStyle !== "bladeWave") return;
 
   const count = game.player.bulletCount;
@@ -9468,12 +9476,8 @@ function drawSceneHeroOverlay(sceneId, color) {
 
 function drawCultivationAvatar(player, attack, facing) {
   const cast = Math.sin(attack * Math.PI);
-  const attackActive = attack > 0;
-  const attackPhase = attackActive ? 1 - Math.min(1, attack) : 0;
-  const attackSmooth = attackPhase * attackPhase * (3 - 2 * attackPhase);
   const realmTier = Math.floor((player.level - 1) / 3);
   const visualTier = Math.min(14, 1 + Math.floor(Math.sqrt(realmTier + 1) * 2));
-  const classIndex = player.combatClass.id === "melee" ? 0 : player.combatClass.id === "ranger" ? 1 : 2;
   ctx.save();
   for (let ring = 0; ring < Math.min(5, 1 + Math.floor(visualTier / 3)); ring += 1) {
     ctx.strokeStyle = colorAlpha(player.weapon.color, .38 - ring * .045); ctx.lineWidth = 1.4 + ring * .22;
@@ -9484,14 +9488,19 @@ function drawCultivationAvatar(player, attack, facing) {
   const sprite = getHeroSprite("cultivation", player.combatClass.id);
   let spriteRendered = false;
   if (isAssetRenderable(sprite)) {
-    const baseSway = Math.sin(player.walkPhase) * .035;
-    const weaponMotion = player.combatClass.id === "mage" ? -cast * .035 : (-.13 + attackSmooth * .29) * (attackActive ? 1 : 0);
-    const thrust = player.combatClass.id === "mage" ? cast * 2 : cast * 5;
-    ctx.save();
-    ctx.translate(thrust, -cast * 3);
-    ctx.rotate(baseSway + weaponMotion);
-    spriteRendered = drawImageSafe(sprite, 0, 0, sprite.naturalWidth, sprite.naturalHeight, -46, -89 - cast * 3, 92, 124);
-    ctx.restore();
+    const moving = Math.hypot(game.move.x, game.move.y) > .05 || movementKeys.size > 0;
+    spriteRendered = drawAnimatedHeroSprite(
+      sprite,
+      0,
+      sprite.naturalWidth,
+      92,
+      124,
+      moving,
+      Math.sin(player.walkPhase),
+      attack,
+      player.combatClass.id,
+      "cultivation",
+    );
   }
   if (!spriteRendered) drawFallbackPlayerAvatar(player, Math.hypot(game.move.x, game.move.y) > .05 || movementKeys.size > 0, Math.sin(player.walkPhase), attack, "cultivation");
   const bladeCount = Math.min(12, player.swordCount);
@@ -9804,6 +9813,12 @@ function drawFallbackPlayerAvatar(player, moving, stride, attack, sceneId = game
     ctx.fillStyle = orb; ctx.beginPath(); ctx.arc(35, -17, 14 + attackPulse * 5, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
+  if (attack > 0) {
+    const pose = getAttackChoreography(attack, classId, sceneId, player.attackSequence || 0);
+    player.attackPoseRendered = true;
+    player.attackFootPlantRendered = true;
+    player.attackStageRendered = pose.stage;
+  }
 }
 
 function drawBase() {
@@ -9817,6 +9832,9 @@ function drawBase() {
   const attack = player.attackAnim;
   const classIndex = player.combatClass.id === "melee" ? 0 : player.combatClass.id === "ranger" ? 1 : 2;
   const facing = Math.cos(player.aimAngle) < 0 ? -1 : 1;
+  player.attackPoseRendered = false;
+  player.attackFootPlantRendered = false;
+  player.attackStageRendered = attack > 0 ? "windup" : "idle";
   ctx.save();
   if (game.invulnerable > 0) ctx.globalAlpha = .45 + Math.sin(game.elapsed * 24) * .3;
   const auraRadius = 34 + Math.min(18, player.level * 1.3);
@@ -9863,13 +9881,16 @@ function drawBase() {
     ctx.beginPath(); ctx.arc(x, y, 42 + (1 - player.blockedPulse / .18) * 16, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
   }
   const attackEase = Math.sin(attack * Math.PI);
-  const recoil = player.combatClass.id === "ranger" ? attackEase * -9 : player.combatClass.id === "melee" ? attackEase * 9 : attackEase * -3;
-  ctx.translate(x + Math.cos(player.aimAngle) * recoil, y + bob + Math.sin(player.aimAngle) * recoil);
-  ctx.rotate(staticOrbitCraft ? 0 : (moving ? stride * .025 : 0) + attackEase * (player.combatClass.id === "melee" ? .055 : -.022));
-  ctx.scale(1 + attackEase * .045, 1 - attackEase * .035);
+  const craftRecoil = game.scene.id === "orbit" ? (player.combatClass.id === "ranger" ? -7 : 3) * attackEase : 0;
+  ctx.translate(x + Math.cos(player.aimAngle) * craftRecoil, y + bob + Math.sin(player.aimAngle) * craftRecoil);
+  ctx.rotate(staticOrbitCraft ? 0 : (moving ? stride * .025 : 0));
+  if (game.scene.id === "orbit") ctx.scale(1 + attackEase * .025, 1 - attackEase * .018);
   if (game.scene.id !== "orbit") ctx.scale(facing, 1);
   if (game.scene.id === "orbit") {
     game.playerVisualMode = drawOrbitCraft(player, moving, stride, attackEase) ? "sprite" : "procedural";
+    player.attackPoseRendered = attack > 0;
+    player.attackFootPlantRendered = true;
+    player.attackStageRendered = attack > .7 ? "windup" : attack > .28 ? "release" : attack > 0 ? "recovery" : "idle";
   } else if (game.scene.id === "cultivation") {
     game.playerVisualMode = drawCultivationAvatar(player, attack, facing) ? "sprite" : "fallback";
   } else {
@@ -9956,65 +9977,134 @@ function drawOrbitCraft(player, moving, stride, attackEase) {
   return false;
 }
 
+function getAttackChoreography(attack, classId, sceneId, sequence = 0) {
+  const active = attack > 0;
+  if (!active) return {
+    active: false, stage: "idle", progress: 0, anticipation: 0, strike: 0,
+    upperX: 0, upperY: 0, upperRotation: 0, headRotation: 0, footBrace: 0,
+  };
+  const progress = Math.max(0, Math.min(1, 1 - attack));
+  const smooth = (value) => value * value * (3 - 2 * value);
+  let stage;
+  let anticipation = 0;
+  let strike = 0;
+  if (progress < .24) {
+    stage = "windup";
+    anticipation = smooth(progress / .24);
+  } else if (progress < .58) {
+    stage = "release";
+    const phase = smooth((progress - .24) / .34);
+    anticipation = 1 - phase;
+    strike = phase;
+  } else {
+    stage = "recovery";
+    strike = 1 - smooth((progress - .58) / .42);
+  }
+  const intensity = preferences.reduceMotion ? .48 : 1;
+  const variant = sequence % 2 ? 1 : -.72;
+  const shieldPush = classId === "melee" && sceneId === "hospital";
+  const upperRotation = intensity * (shieldPush
+    ? anticipation * -.025 + strike * .045
+    : classId === "melee"
+      ? anticipation * -.15 + strike * .19
+      : classId === "ranger"
+        ? anticipation * .035 - strike * .06
+        : (anticipation * -.035 + strike * .055) * variant);
+  const upperX = intensity * (shieldPush
+    ? strike * 11 - anticipation * 2
+    : classId === "melee"
+      ? strike * 5 - anticipation * 3
+      : classId === "ranger"
+        ? anticipation * 2.5 - strike * 6
+        : strike * 4 - anticipation * 1.5);
+  const upperY = intensity * (classId === "melee"
+    ? -strike * 2.5
+    : classId === "ranger"
+      ? strike * 1.5
+      : -strike * 4);
+  const footBrace = intensity * Math.max(anticipation, strike) * (classId === "melee" ? 1 : classId === "ranger" ? .72 : .45);
+  return {
+    active, stage, progress, anticipation, strike, upperX, upperY, upperRotation,
+    headRotation: upperRotation * (classId === "melee" ? .08 : classId === "ranger" ? .03 : .12),
+    footBrace,
+  };
+}
+
 function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, moving, stride, attack, classId, sceneId) {
   const sourceHeight = atlas.naturalHeight;
   const topY = -height * .58;
-  const split = .61;
-  const overlap = .035;
-  const step = moving ? stride : 0;
+  const headSplit = .32;
+  const waistSplit = .61;
+  const overlap = .022;
+  const pose = getAttackChoreography(attack, classId, sceneId, game.player.attackSequence || 0);
+  const locomotionScale = pose.active ? .24 : 1;
+  const step = moving ? stride * locomotionScale : 0;
   const legLift = Math.abs(step) * 4.8;
   const bodyLean = moving ? step * -.018 : 0;
-  const attackActive = attack > 0;
-  const attackPhase = attackActive ? 1 - Math.min(1, attack) : 0;
-  const attackSmooth = attackPhase * attackPhase * (3 - 2 * attackPhase);
-  const attackPulse = attackActive ? Math.sin(attackPhase * Math.PI) : 0;
-  const shieldPush = classId === "melee" && sceneId === "hospital";
-  const weaponSwing = classId === "melee" && !shieldPush
-    ? (-.14 + attackSmooth * .31) * (attackActive ? 1 : 0)
-    : 0;
-  const upperRecoil = classId === "ranger" ? -attackPulse * .075 : classId === "mage" ? -attackPulse * .035 : 0;
-  const upperThrust = shieldPush ? attackPulse * 12 : classId === "ranger" ? -attackPulse * 5 : classId === "mage" ? attackPulse * 3 : attackPulse * 4;
-  const upperLift = classId === "melee" ? -attackPulse * 3 : classId === "ranger" ? attackPulse * 1.5 : -attackPulse * 2;
-  ctx.save();
-  if (attackActive) {
-    ctx.translate(upperThrust, upperLift);
-    ctx.rotate(weaponSwing + upperRecoil);
-    if (shieldPush) ctx.scale(1 + attackPulse * .08, 1 - attackPulse * .035);
-    else if (classId === "melee") ctx.scale(1 + attackPulse * .035, 1 - attackPulse * .02);
-    else if (classId === "ranger") ctx.scale(1 - attackPulse * .025, 1 + attackPulse * .018);
-    const rendered = drawImageSafe(atlas, sourceX, 0, sourceWidth, sourceHeight, -width / 2, topY, width, height);
-    ctx.restore();
-    return rendered;
-  }
-
   let rendered = true;
+  ctx.save();
+
+  // The feet and lower legs are rendered first and remain planted while the weapon side acts.
+  // This avoids the former full-poster recoil that made every humanoid hover during an attack.
   const drawLeg = (side) => {
     const sourceLeft = sourceX + (side < 0 ? 0 : sourceWidth * .5);
     const phase = side < 0 ? step : -step;
+    const brace = pose.footBrace * (side < 0 ? -1 : 1);
     ctx.save();
-    ctx.translate(side * phase * 2.2, legLift * (phase > 0 ? -.7 : .28));
-    ctx.rotate(side * phase * .045);
+    ctx.translate(side * phase * 2.2 + brace * 3.2, legLift * (phase > 0 ? -.7 : .28));
+    ctx.rotate(side * phase * .045 + brace * .016);
     rendered = drawImageSafe(
       atlas,
       sourceLeft,
-      sourceHeight * (split - overlap),
+      sourceHeight * (waistSplit - overlap),
       sourceWidth * .5,
-      sourceHeight * (1 - split + overlap),
+      sourceHeight * (1 - waistSplit + overlap),
       side < 0 ? -width / 2 : 0,
-      topY + height * (split - overlap),
+      topY + height * (waistSplit - overlap),
       width * .5,
-      height * (1 - split + overlap),
+      height * (1 - waistSplit + overlap),
     ) && rendered;
     ctx.restore();
   };
   drawLeg(-1);
   drawLeg(1);
 
+  // Arms, coat tails and the weapon share the torso band; the face is deliberately excluded.
+  // Rotation happens around the waist, so melee swings and ranged recoil do not drag the head or feet.
+  const waistY = topY + height * waistSplit;
   ctx.save();
-  ctx.translate(upperThrust, upperLift);
-  ctx.rotate(bodyLean + weaponSwing + upperRecoil);
+  ctx.translate(pose.upperX, waistY + pose.upperY);
+  ctx.rotate(bodyLean + pose.upperRotation);
   ctx.transform(1, moving ? step * .012 : 0, 0, 1, 0, -Math.abs(step) * 1.5);
-  rendered = drawImageSafe(atlas, sourceX, 0, sourceWidth, sourceHeight * (split + overlap), -width / 2, topY, width, height * (split + overlap)) && rendered;
+  rendered = drawImageSafe(
+    atlas,
+    sourceX,
+    sourceHeight * (headSplit - overlap),
+    sourceWidth,
+    sourceHeight * (waistSplit - headSplit + overlap * 2),
+    -width / 2,
+    topY + height * (headSplit - overlap) - waistY,
+    width,
+    height * (waistSplit - headSplit + overlap * 2),
+  ) && rendered;
+  ctx.restore();
+
+  // A separately stabilized head removes the robotic whole-body nod from firing and sword swings.
+  const neckY = topY + height * headSplit;
+  ctx.save();
+  ctx.translate(0, neckY - Math.abs(step) * .55);
+  ctx.rotate(pose.headRotation);
+  rendered = drawImageSafe(
+    atlas,
+    sourceX,
+    0,
+    sourceWidth,
+    sourceHeight * (headSplit + overlap),
+    -width / 2,
+    topY - neckY,
+    width,
+    height * (headSplit + overlap),
+  ) && rendered;
   ctx.restore();
 
   if (moving) {
@@ -10022,6 +10112,11 @@ function drawAnimatedHeroSprite(atlas, sourceX, sourceWidth, width, height, movi
     ctx.lineWidth = 2; ctx.lineCap = "round";
     const rear = step > 0 ? -1 : 1;
     ctx.beginPath(); ctx.moveTo(rear * 12, height * .36); ctx.lineTo(rear * (20 + Math.abs(step) * 8), height * .38); ctx.stroke();
+  }
+  if (pose.active && rendered) {
+    game.player.attackPoseRendered = true;
+    game.player.attackFootPlantRendered = true;
+    game.player.attackStageRendered = pose.stage;
   }
   ctx.restore();
   return rendered;
@@ -10975,6 +11070,14 @@ if (QA_MODE) {
         renderFailures: renderFailureCount,
         assetState: getHeroSprite(game.scene.id, game.player.combatClass.id)?.dataset.assetState || "unknown",
       },
+      attackPose: {
+        sequence: game.player.attackSequence || 0,
+        stage: game.player.attackStageRendered || "idle",
+        active: game.player.attackAnim > 0,
+        progress: Number(Math.max(0, Math.min(1, 1 - game.player.attackAnim)).toFixed(2)),
+        rendered: Boolean(game.player.attackPoseRendered),
+        footPlantRendered: Boolean(game.player.attackFootPlantRendered),
+      },
       branch: game.player.branchFocus,
       derivedStyle: game.player.derivedStyle,
       derivedMechanics: {
@@ -11051,6 +11154,13 @@ if (QA_MODE) {
       const sprite = getHeroSprite(game.scene.id, game.player.combatClass.id);
       sprite.dataset.qaForceFallback = String(Boolean(active));
       if (!active) recoverAssetImage(sprite);
+    },
+    forceAttackPose: (attack = .62) => {
+      if (!game) return;
+      game.player.attackAnim = Math.max(.01, Math.min(.99, Number(attack) || .62));
+      game.player.attackSequence = (game.player.attackSequence || 0) + 1;
+      game.player.attackPoseRendered = false;
+      game.player.attackFootPlantRendered = false;
     },
   };
 }
