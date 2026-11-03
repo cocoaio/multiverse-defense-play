@@ -646,6 +646,19 @@ const enemySkillThemes = {
   cultivation: { rangedStyle: "flyingSword", casterStyle: "talisman", rangedName: "追魂飞剑", casterName: "镇灵法符", effect: "seal", curve: .14 },
 };
 
+// Close-range enemies communicate danger through their body and held material,
+// not a generic range ring. The profile also drives the actual contact burst so
+// windup, motion and impact speak the same visual language in every world.
+const enemyMeleeAttackProfiles = {
+  city: { name: "感染撕袭", motif: "claw", color: "#ff735b", accent: "#ffd1a2", fx: "powerArc", material: "alloy" },
+  snow: { name: "冰爪碎击", motif: "frostClaw", color: "#9cecff", accent: "#f2fdff", fx: "snowball", material: "ice" },
+  hospital: { name: "毒膜扑噬", motif: "membrane", color: "#62f0bb", accent: "#eafff6", fx: "serum", material: "membrane" },
+  orbit: { name: "虫钳突袭", motif: "pincer", color: "#85eaff", accent: "#c3a7ff", fx: "plasma", material: "alloy" },
+  mars: { name: "熔岩骨刃", motif: "talon", color: "#ff8a45", accent: "#ffe19a", fx: "flameArc", material: "stone" },
+  moon: { name: "伺服重拳", motif: "piston", color: "#cfc9ff", accent: "#f8f6ff", fx: "gravityArc", material: "ceramic" },
+  cultivation: { name: "破罡剑斩", motif: "sword", color: "#f0d889", accent: "#efffe7", fx: "qiArc", material: "spirit" },
+};
+
 // The first contact is art-directed per battlefield. These profiles are used
 // by both the enemy ingress lane and the screen-space threat card, so the
 // opening reads as part of the world instead of three actors popping in at the
@@ -760,6 +773,10 @@ const hitMaterialSoundProfiles = {
 
 function getEnemySkillTheme(sceneId = game?.scene?.id || "city") {
   return enemySkillThemes[sceneId] || enemySkillThemes.city;
+}
+
+function getEnemyMeleeAttackProfile(sceneId = game?.scene?.id || "city") {
+  return enemyMeleeAttackProfiles[sceneId] || enemyMeleeAttackProfiles.city;
 }
 
 function getBossPhaseName(phase, sceneId = game?.scene?.id || "city") {
@@ -2057,6 +2074,7 @@ function makeGame(runType = "main") {
     corpses: [],
     bullets: [],
     impactBursts: [],
+    lastEnemyMeleeImpact: null,
     airstrikes: [],
     lightnings: [],
     particles: [],
@@ -3114,10 +3132,15 @@ function spawnEnemy(type, x, y, forcedAngle) {
     isMoving: false,
     locomotionPoseRendered: false,
     footPlantRendered: false,
+    meleeAttackPoseRendered: false,
+    meleeAttackStageRendered: "idle",
+    meleeCueRendered: false,
+    meleeActionRendered: false,
     attackTimer: rand(0.2, 0.8),
     attackWindup: 0,
     attackWindupMax: 0,
     attackRecovery: 0,
+    attackRecoveryMax: 0,
     attackTargetX: game.player.x,
     attackTargetY: game.player.y,
     attackAngle: 0,
@@ -3810,6 +3833,8 @@ function beginEnemyAttack(enemy, duration) {
   const leadSeconds = enemy.type === "caster" ? .14 : enemy.type === "ranged" ? .09 : 0;
   enemy.attackWindup = duration;
   enemy.attackWindupMax = duration;
+  enemy.attackRecovery = 0;
+  enemy.attackRecoveryMax = 0;
   enemy.attackTargetX = game.player.x + game.move.x * game.player.moveSpeed * leadSeconds;
   enemy.attackTargetY = game.player.y + game.move.y * game.player.moveSpeed * leadSeconds;
   enemy.attackAngle = Math.atan2(enemy.attackTargetY - enemy.y, enemy.attackTargetX - enemy.x);
@@ -3822,6 +3847,7 @@ function resolveEnemyAttack(enemy) {
     fireEnemyProjectile(enemy, enemy.attackTargetX, enemy.attackTargetY);
     enemy.attackTimer = enemy.type === "caster" ? rand(3.1, 4.0) : rand(2.45, 3.25);
     enemy.attackRecovery = .2;
+    enemy.attackRecoveryMax = .2;
     return;
   }
   const angle = enemy.attackAngle;
@@ -3829,11 +3855,35 @@ function resolveEnemyAttack(enemy) {
   const strikeX = enemy.x + Math.cos(angle) * reach * .72;
   const strikeY = enemy.y + Math.sin(angle) * reach * .72;
   const hit = Math.hypot(game.player.x - enemy.x, game.player.y - enemy.y) <= reach;
-  game.shockwaves.push({ x: strikeX, y: strikeY, radius: 2, maxRadius: enemy.type === "boss" ? 31 : 18, life: .24, color: hit ? "#ff7169" : enemy.color });
-  makeDirectionalParticles(strikeX, strikeY, hit ? "#ff806f" : enemy.color, enemy.type === "boss" ? 10 : 5, enemy.type === "boss" ? 125 : 78, angle, .55, "spark");
+  const profile = getEnemyMeleeAttackProfile();
+  const impactX = hit ? game.player.x : strikeX;
+  const impactY = hit ? game.player.y : strikeY;
+  const impact = {
+    x: impactX,
+    y: impactY,
+    color: profile.color,
+    accent: profile.accent,
+    fx: profile.fx,
+    angle,
+    sceneId: game.scene.id,
+    material: profile.material,
+    enemyAttack: true,
+    attackName: profile.name,
+    life: enemy.type === "boss" ? .38 : .3,
+    maxLife: enemy.type === "boss" ? .38 : .3,
+    critical: false,
+    heavyEnemyAttack: enemy.type === "boss",
+    seed: enemy.sway + game.elapsed,
+    rendered: false,
+  };
+  if (game.impactBursts.length < EFFECT_LIMITS.bursts) game.impactBursts.push(impact);
+  game.lastEnemyMeleeImpact = impact;
+  game.shockwaves.push({ x: impactX, y: impactY, radius: 2, maxRadius: enemy.type === "boss" ? 31 : 16, life: .2, color: profile.color, ellipse: .58 });
+  makeDirectionalParticles(impactX, impactY, profile.color, enemy.type === "boss" ? 8 : 3, enemy.type === "boss" ? 125 : 72, angle, .52, profile.material === "ice" ? "shard" : profile.material === "spirit" ? "glyph" : "spark");
   if (hit) damagePlayer(enemy.damage, enemy.x, enemy.y, enemy.type === "boss");
   enemy.attackTimer = enemy.type === "boss" ? .82 : enemy.type === "runner" ? .92 : 1.08;
   enemy.attackRecovery = enemy.type === "boss" ? .28 : .18;
+  enemy.attackRecoveryMax = enemy.attackRecovery;
 }
 
 function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
@@ -6596,6 +6646,10 @@ function drawBattlefield() {
   for (const enemy of visibleEnemies) {
     enemy.locomotionPoseRendered = false;
     enemy.footPlantRendered = false;
+    enemy.meleeAttackPoseRendered = false;
+    enemy.meleeAttackStageRendered = "idle";
+    enemy.meleeCueRendered = false;
+    enemy.meleeActionRendered = false;
   }
   const actors = [...visibleEnemies, game.player, ...(companionActor ? [companionActor] : [])];
   actors.sort((a, b) => {
@@ -7666,7 +7720,6 @@ function drawBossDemise(demise) {
 function drawEnemyAttackCue(enemy, s) {
   if (!(enemy.attackWindup > 0) || !(enemy.attackWindupMax > 0)) return;
   const progress = Math.min(1, Math.max(0, 1 - enemy.attackWindup / enemy.attackWindupMax));
-  const pulse = .7 + Math.sin(ambienceTime * 28) * .22;
   const isRanged = enemy.type === "ranged" || enemy.type === "caster";
   const cueColor = enemy.type === "caster" ? game.scene.colors.hit : enemy.type === "ranged" ? game.scene.colors.shot : "#ff8a70";
   ctx.save();
@@ -7687,21 +7740,27 @@ function drawEnemyAttackCue(enemy, s) {
     ctx.fillStyle = colorAlpha(cueColor, .38 + progress * .42);
     ctx.beginPath(); ctx.arc(0, 0, 3 + progress * 4, 0, Math.PI * 2); ctx.fill();
   } else {
-    const radius = s * (1.42 + progress * .35);
-    ctx.strokeStyle = "rgba(8,5,6,.82)"; ctx.lineWidth = enemy.type === "boss" ? 9 : 6;
-    ctx.beginPath(); ctx.arc(0, 0, radius, -.78, .78); ctx.stroke();
-    ctx.strokeStyle = colorAlpha(cueColor, pulse + progress * .18); ctx.lineWidth = enemy.type === "boss" ? 5 : 3;
-    ctx.beginPath(); ctx.arc(0, 0, radius, -.78, -.78 + 1.56 * progress); ctx.stroke();
-    ctx.fillStyle = colorAlpha(cueColor, .62 + progress * .32);
-    ctx.beginPath(); ctx.moveTo(radius + 7, 0); ctx.lineTo(radius - 5, -6); ctx.lineTo(radius - 5, 6); ctx.closePath(); ctx.fill();
-    ctx.save();
-    ctx.rotate(-(enemy.attackAngle || 0));
-    ctx.translate(0, -s * (enemy.type === "boss" ? 2.4 : 2.05));
-    ctx.fillStyle = "rgba(12,6,7,.88)"; ctx.strokeStyle = cueColor; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0, 0, enemy.type === "boss" ? 14 : 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#ffffff"; ctx.font = `950 ${enemy.type === "boss" ? 16 : 12}px system-ui`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("!", 0, 1);
-    ctx.restore();
+    const profile = getEnemyMeleeAttackProfile();
+    const glint = s * (.08 + progress * .12);
+    enemy.meleeCueRendered = true;
+    ctx.translate(s * (.46 + progress * .16), -s * .2);
+    ctx.strokeStyle = colorAlpha(profile.accent, .52 + progress * .45);
+    ctx.fillStyle = colorAlpha(profile.color, .42 + progress * .4);
+    ctx.lineWidth = Math.max(1.2, s * .045);
+    ctx.beginPath(); ctx.moveTo(-glint * 1.5, 0); ctx.lineTo(glint * 1.5, 0); ctx.moveTo(0, -glint); ctx.lineTo(0, glint); ctx.stroke();
+    if (profile.motif === "frostClaw") {
+      ctx.beginPath(); ctx.moveTo(0, -glint * 1.4); ctx.lineTo(glint, glint); ctx.lineTo(-glint, glint); ctx.closePath(); ctx.stroke();
+    } else if (profile.motif === "membrane") {
+      ctx.beginPath(); ctx.ellipse(0, 0, glint * 1.35, glint * .72, progress, 0, Math.PI * 2); ctx.stroke();
+    } else if (profile.motif === "pincer") {
+      ctx.beginPath(); ctx.moveTo(-glint, -glint); ctx.lineTo(glint * .4, 0); ctx.lineTo(-glint, glint); ctx.stroke();
+    } else if (profile.motif === "piston") {
+      ctx.strokeRect(-glint, -glint * .62, glint * 2, glint * 1.24);
+    } else if (profile.motif === "sword") {
+      ctx.rotate(-.35); ctx.fillRect(-glint * 1.35, -glint * .16, glint * 2.7, glint * .32);
+    } else {
+      ctx.beginPath(); ctx.moveTo(glint * 1.25, 0); ctx.lineTo(-glint * .65, -glint * .7); ctx.lineTo(-glint * .25, 0); ctx.lineTo(-glint * .65, glint * .7); ctx.closePath(); ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -7999,6 +8058,28 @@ function drawEnemyHitReactionLayer(enemy, s, pulse) {
   ctx.restore();
 }
 
+function getEnemyMeleeAttackPose(enemy) {
+  if (!enemy || enemy.type === "ranged" || enemy.type === "caster") {
+    return { active: false, stage: "idle", charge: 0, impact: 0, facing: 1 };
+  }
+  const windup = enemy.attackWindup > 0 && enemy.attackWindupMax > 0
+    ? Math.max(0, Math.min(1, 1 - enemy.attackWindup / enemy.attackWindupMax))
+    : 0;
+  const recovery = enemy.attackRecovery > 0 && enemy.attackRecoveryMax > 0
+    ? Math.max(0, Math.min(1, enemy.attackRecovery / enemy.attackRecoveryMax))
+    : 0;
+  const charge = windup * windup * (3 - 2 * windup);
+  const impact = recovery * recovery * (3 - 2 * recovery);
+  const stage = windup > 0 ? (windup < .72 ? "windup" : "locked") : recovery > .56 ? "impact" : recovery > 0 ? "recovery" : "idle";
+  return {
+    active: windup > 0 || recovery > 0,
+    stage,
+    charge,
+    impact,
+    facing: Math.cos(enemy.attackAngle || 0) >= 0 ? 1 : -1,
+  };
+}
+
 function isEnemyArticulationEligible(enemy) {
   return enemy.type !== "boss" && ["city", "snow", "mars", "moon", "cultivation"].includes(game.scene.id);
 }
@@ -8011,9 +8092,15 @@ function drawArticulatedEnemySprite(image, sourceX, sourceWidth, sourceHeight, d
   enemy.footPlantRendered = true;
 
   const moving = enemy.isMoving && enemy.attackWindup <= 0;
+  const contactPose = getEnemyMeleeAttackPose(enemy);
+  if (contactPose.active) {
+    enemy.meleeAttackPoseRendered = true;
+    enemy.meleeAttackStageRendered = contactPose.stage;
+  }
   const motionWeight = moving ? Math.min(1, .34 + (enemy.motionSpeed || 0) / Math.max(42, enemy.speed || 42) * .66) : 0;
   const phase = enemy.walkPhase || 0;
   const step = Math.sin(phase) * motionWeight;
+  const brace = contactPose.facing * (contactPose.impact * .62 - contactPose.charge * .32);
   const split = .565;
   const overlap = .024;
   const hipY = destinationY + height * split;
@@ -8040,7 +8127,7 @@ function drawArticulatedEnemySprite(image, sourceX, sourceWidth, sourceHeight, d
   // The upper crop is then counter-balanced so the enemy no longer slides as
   // one rigid card across the battlefield.
   for (const side of [-1, 1]) {
-    const legPhase = side < 0 ? step : -step;
+    const legPhase = (side < 0 ? step : -step) + brace * (side === contactPose.facing ? .22 : -.12);
     const lift = Math.max(0, legPhase) * height * .024;
     const halfSourceWidth = sourceWidth * .5;
     const halfDestinationWidth = width * .5;
@@ -8060,10 +8147,13 @@ function drawArticulatedEnemySprite(image, sourceX, sourceWidth, sourceHeight, d
     ctx.restore();
   }
 
-  const torsoLean = step * (enemy.type === "runner" ? -.028 : -.016);
-  const torsoShift = step * width * .012;
+  const torsoLean = step * (enemy.type === "runner" ? -.028 : -.016)
+    + contactPose.facing * (contactPose.impact * .19 - contactPose.charge * .105);
+  const torsoShift = step * width * .012
+    + contactPose.facing * width * (contactPose.impact * .11 - contactPose.charge * .035);
+  const torsoDrop = contactPose.impact * height * .018;
   ctx.save();
-  ctx.translate(destinationX + width * .5 + torsoShift, hipY);
+  ctx.translate(destinationX + width * .5 + torsoShift, hipY + torsoDrop);
   ctx.rotate(torsoLean);
   drawImageSafe(
     image,
@@ -8073,6 +8163,62 @@ function drawArticulatedEnemySprite(image, sourceX, sourceWidth, sourceHeight, d
   );
   ctx.restore();
   return true;
+}
+
+function drawEnemyMeleeActionLayer(enemy, s) {
+  const pose = getEnemyMeleeAttackPose(enemy);
+  if (!pose.active || enemy.type === "ranged" || enemy.type === "caster") return;
+  const profile = getEnemyMeleeAttackProfile();
+  const force = Math.max(pose.charge * .42, pose.impact);
+  const reach = s * (.48 + pose.charge * .16 + pose.impact * .62);
+  enemy.meleeActionRendered = true;
+  ctx.save();
+  ctx.rotate(enemy.attackAngle || 0);
+  ctx.translate(s * .28, -s * .18);
+  ctx.globalAlpha *= .24 + force * .7;
+  ctx.strokeStyle = profile.color;
+  ctx.fillStyle = colorAlpha(profile.color, .54 + force * .28);
+  ctx.lineWidth = Math.max(1.4, s * (.045 + pose.impact * .055));
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (!LOW_POWER_DEVICE && allowExpensiveGlow()) { ctx.shadowColor = profile.color; ctx.shadowBlur = 5 + force * 9; }
+
+  if (profile.motif === "claw") {
+    for (let claw = -1; claw <= 1; claw += 1) {
+      ctx.beginPath();
+      ctx.moveTo(s * .05, claw * s * .16);
+      ctx.quadraticCurveTo(reach * .58, claw * s * .1 - pose.impact * s * .2, reach, claw * s * .24);
+      ctx.stroke();
+    }
+  } else if (profile.motif === "frostClaw") {
+    for (let shard = -1; shard <= 1; shard += 1) {
+      ctx.beginPath(); ctx.moveTo(0, shard * s * .14); ctx.lineTo(reach * .48, shard * s * .08); ctx.lineTo(reach, shard * s * .2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(reach * .48, shard * s * .08); ctx.lineTo(reach * .68, shard * s * .08 - s * .18); ctx.stroke();
+    }
+  } else if (profile.motif === "membrane") {
+    for (let cell = 0; cell < 3; cell += 1) {
+      const x = reach * (.28 + cell * .28);
+      ctx.beginPath(); ctx.ellipse(x, (cell - 1) * s * .12, s * (.16 + pose.impact * .08), s * .1, cell * .4, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else if (profile.motif === "pincer") {
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(0, side * s * .18); ctx.lineTo(reach * .58, side * s * (.32 - pose.impact * .14)); ctx.lineTo(reach, side * s * .08); ctx.stroke();
+    }
+  } else if (profile.motif === "talon") {
+    ctx.beginPath(); ctx.moveTo(0, s * .14); ctx.lineTo(reach * .82, -s * .24); ctx.lineTo(reach, 0); ctx.lineTo(reach * .36, s * .24); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(s * .16, s * .09); ctx.lineTo(reach * .78, -s * .12); ctx.stroke();
+  } else if (profile.motif === "piston") {
+    ctx.strokeRect(s * .05, -s * .12, reach * .72, s * .24);
+    ctx.fillRect(reach * .66, -s * (.2 + pose.impact * .05), s * .28, s * (.4 + pose.impact * .1));
+    ctx.strokeStyle = profile.accent; ctx.beginPath(); ctx.moveTo(s * .12, 0); ctx.lineTo(reach * .62, 0); ctx.stroke();
+  } else {
+    ctx.strokeStyle = profile.accent;
+    ctx.lineWidth = Math.max(1.8, s * .07);
+    ctx.beginPath(); ctx.moveTo(-s * .08, s * .14); ctx.lineTo(reach, -s * .12); ctx.stroke();
+    ctx.strokeStyle = profile.color; ctx.lineWidth = Math.max(1.2, s * .04);
+    ctx.beginPath(); ctx.arc(reach * .06, 0, reach * (.82 + pose.impact * .24), -.62, .55); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawEnemy(enemy) {
@@ -8121,11 +8267,21 @@ function drawEnemy(enemy) {
   const bossPose = enemy.type === "boss" ? getBossActionPose(enemy) : { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
   const entryOffset = enemy.openingEntrant ? (1 - openingEase) * 34 : 0;
   const entryAngle = enemy.openingEntryAngle || 0;
-  ctx.translate(enemy.x + Math.cos(entryAngle) * entryOffset + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x, enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y);
-  if (enemy.openingEntrant && openingProgress < 1) ctx.scale(.68 + openingEase * .32, .76 + openingEase * .24);
   const articulatedPose = isEnemyArticulationEligible(enemy);
+  const contactPose = getEnemyMeleeAttackPose(enemy);
+  const wholeBodyLunge = articulatedPose ? 0 : s * (contactPose.impact * .2 - contactPose.charge * .05);
+  if (contactPose.active) {
+    enemy.meleeAttackPoseRendered = true;
+    enemy.meleeAttackStageRendered = contactPose.stage;
+  }
+  ctx.translate(
+    enemy.x + Math.cos(entryAngle) * entryOffset + Math.cos(kickAngle) * kick + reactionJitterX * reactionMotion + bossPose.x + Math.cos(enemy.attackAngle || 0) * wholeBodyLunge,
+    enemy.y + Math.sin(entryAngle) * entryOffset + Math.sin(kickAngle) * kick + reactionJitterY * reactionMotion + bossPose.y + Math.sin(enemy.attackAngle || 0) * wholeBodyLunge,
+  );
+  if (enemy.openingEntrant && openingProgress < 1) ctx.scale(.68 + openingEase * .32, .76 + openingEase * .24);
   const idleRock = articulatedPose ? 0 : Math.sin(game.elapsed * 5 + enemy.sway) * (enemy.type === "runner" ? 0.12 : 0.06);
-  ctx.rotate(idleRock + attackLean * (articulatedPose ? .32 : 1) + reactionRotate * reactionMotion + bossPose.rotation);
+  const contactRotation = articulatedPose ? 0 : contactPose.facing * (contactPose.impact * .13 - contactPose.charge * .07);
+  ctx.rotate(idleRock + attackLean * (articulatedPose ? .12 : .42) + contactRotation + reactionRotate * reactionMotion + bossPose.rotation);
   ctx.scale((1 + (reactionScaleX - 1) * reactionMotion) * bossPose.scaleX, (1 + (reactionScaleY - 1) * reactionMotion) * bossPose.scaleY);
   if (kick > 0) ctx.transform(1 - Math.min(.14, kick * .009), 0, 0, 1 + Math.min(.11, kick * .007), 0, 0);
   if (enemy.type === "boss" && enemy.bossReaction > 0) {
@@ -8145,6 +8301,7 @@ function drawEnemy(enemy) {
     if (game.scene.id === "mars") drawMartianEnemy(enemy, s, frozen);
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
+  drawEnemyMeleeActionLayer(enemy, s);
   drawEnemyHitReactionLayer(enemy, s, reactionPulse);
   drawBossDamageState(enemy, s, "front");
   if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
@@ -8833,15 +8990,70 @@ function drawImpactMaterial(burst, progress, alpha) {
   ctx.restore();
 }
 
+function drawEnemyMeleeImpactBurst(burst, progress, alpha) {
+  const profile = getEnemyMeleeAttackProfile(burst.sceneId);
+  const motif = profile.motif;
+  const travel = 18 + progress * 34;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = profile.color;
+  ctx.fillStyle = colorAlpha(profile.color, .72);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1.4, 5.4 - progress * 3.2);
+  if (!LOW_POWER_DEVICE && allowExpensiveGlow()) { ctx.shadowColor = profile.color; ctx.shadowBlur = 8; }
+  if (motif === "claw") {
+    for (let slash = -1; slash <= 1; slash += 1) {
+      ctx.beginPath(); ctx.moveTo(-12, slash * 8 - 8); ctx.quadraticCurveTo(travel * .42, slash * 3, travel, slash * 11 + 7); ctx.stroke();
+    }
+  } else if (motif === "frostClaw") {
+    for (let shard = -2; shard <= 2; shard += 1) {
+      ctx.save(); ctx.rotate(shard * .24); ctx.translate(progress * 12, shard * 2); ctx.beginPath(); ctx.moveTo(travel, 0); ctx.lineTo(4, -4); ctx.lineTo(10, 5); ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+  } else if (motif === "membrane") {
+    for (let cell = 0; cell < 5; cell += 1) {
+      const angle = cell / 5 * Math.PI * 2;
+      const radius = 7 + progress * (15 + cell % 2 * 5);
+      ctx.beginPath(); ctx.ellipse(Math.cos(angle) * radius, Math.sin(angle) * radius, 7 - progress * 3, 4 - progress, angle, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = profile.accent; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10 + progress * 14, 0); ctx.stroke();
+  } else if (motif === "pincer") {
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(-10, side * 13); ctx.lineTo(travel * .48, side * 5); ctx.lineTo(travel, side * 16); ctx.stroke();
+    }
+    ctx.strokeStyle = profile.accent; ctx.beginPath(); ctx.moveTo(-4, -16); ctx.lineTo(9 + progress * 13, 0); ctx.lineTo(-4, 16); ctx.stroke();
+  } else if (motif === "talon") {
+    ctx.beginPath(); ctx.moveTo(-12, 9); ctx.lineTo(travel, -13); ctx.lineTo(travel * .68, 1); ctx.lineTo(5, 15); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = profile.accent; ctx.beginPath(); ctx.moveTo(-4, 7); ctx.lineTo(travel * .76, -8); ctx.stroke();
+  } else if (motif === "piston") {
+    for (let rail = -1; rail <= 1; rail += 1) { ctx.beginPath(); ctx.moveTo(-14, rail * 7); ctx.lineTo(travel, rail * 7); ctx.stroke(); }
+    ctx.fillRect(travel * .42, -12, 8 + progress * 9, 24);
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 1.4; ctx.strokeRect(travel * .42 - 4, -16, 16 + progress * 8, 32);
+  } else {
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 5 - progress * 2.6;
+    ctx.beginPath(); ctx.moveTo(-travel * .35, -travel * .42); ctx.lineTo(travel, travel * .28); ctx.stroke();
+    ctx.strokeStyle = profile.color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-travel * .18, travel * .48); ctx.lineTo(travel * .82, -travel * .38); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawImpactBurst(burst) {
+  burst.rendered = true;
   if (burst.derivedProc && game.lastDerivedMechanic?.style === burst.derivedStyle) game.lastDerivedMechanic.impactRendered = true;
   const progress = 1 - burst.life / burst.maxLife;
   const alpha = Math.max(0, 1 - progress);
   const evolutionTier = burst.evolutionTier || 0;
   ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
+  if (burst.heavyEnemyAttack) ctx.scale(1.22, 1.22);
   if (burst.derivedProc) ctx.scale(1.28, 1.28);
   if (evolutionTier > 0) ctx.scale(1 + evolutionTier * .13, 1 + evolutionTier * .13);
   ctx.globalAlpha = alpha; ctx.lineCap = "round";
+  if (burst.enemyAttack) {
+    drawEnemyMeleeImpactBurst(burst, progress, alpha);
+    ctx.restore();
+    return;
+  }
   drawThemeImpactTexture(burst, progress, alpha);
   if (burst.muzzle) {
     const theme = getThemeCombatProfile(burst.sceneId);
@@ -11049,6 +11261,20 @@ if (QA_MODE) {
           speed: Number((enemy.motionSpeed || 0).toFixed(1)),
           phase: Number((enemy.walkPhase || 0).toFixed(2)),
         })),
+      },
+      enemyMelee: {
+        profile: { ...getEnemyMeleeAttackProfile() },
+        posing: game.enemies.filter((enemy) => enemy.meleeAttackPoseRendered).length,
+        cues: game.enemies.filter((enemy) => enemy.meleeCueRendered).length,
+        actions: game.enemies.filter((enemy) => enemy.meleeActionRendered).length,
+        stages: game.enemies.filter((enemy) => enemy.meleeAttackPoseRendered).map((enemy) => enemy.meleeAttackStageRendered),
+        impact: game.lastEnemyMeleeImpact ? {
+          name: game.lastEnemyMeleeImpact.attackName,
+          sceneId: game.lastEnemyMeleeImpact.sceneId,
+          fx: game.lastEnemyMeleeImpact.fx,
+          rendered: Boolean(game.lastEnemyMeleeImpact.rendered),
+          active: game.impactBursts.includes(game.lastEnemyMeleeImpact),
+        } : null,
       },
       impactMaterials: [...new Set(game.impactBursts.map((burst) => burst.material).filter(Boolean))],
       xpDrops: game.xpDrops.length,
