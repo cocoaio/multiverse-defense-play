@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "86";
+const ASSET_REVISION = "87";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -564,7 +564,7 @@ const EFFECT_LIMITS = LOW_POWER_DEVICE
     ? { particles: 148, floaters: 32, bursts: 34, shockwaves: 26, corpses: 34, xpDrops: 76, medkits: 15, bullets: 112 }
     : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
 function allowExpensiveGlow() {
-  return !LOW_POWER_DEVICE || !game?.showcase;
+  return !LOW_POWER_DEVICE && (game?.performance?.quality ?? 1) >= .64;
 }
 const ENEMY_GRID_SIZE = 128;
 const enemyGridKey = (x, y) => (x + 32768) * 65536 + y + 32768;
@@ -834,6 +834,35 @@ const sceneClassProfiles = {
     mage: { name: "法修 · 星罗", short: "法修", description: "低血量、高法伤，结阵引动范围术法。", color: "#d5b4ff", fx: "spell", ultimateType: "thunderTribulation", ultimateName: "九霄雷劫", ultimateIcon: "雷" },
   },
 };
+
+// A full-screen ultimate presentation uses one strong, theme-specific visual
+// language instead of hundreds of short-lived particles. Each world owns its
+// composition, while the selected role only changes the combat signature.
+const ultimateThemePresentations = {
+  city: { code: "URBAN BREAKPOINT", title: "封锁线崩解", motif: "ruin", primary: "#dfff5a", secondary: "#ff784f", impact: "楼体碎片与动力火力贯穿街区" },
+  snow: { code: "POLAR WHITEOUT", title: "极光雪崩", motif: "glacier", primary: "#dffbff", secondary: "#79dfff", impact: "冰川断面沿冻原整体推进" },
+  hospital: { code: "STERILE OVERRIDE", title: "无菌区重置", motif: "sterile", primary: "#dffff5", secondary: "#66ffd0", impact: "隔离闸门闭合并完成全域裂解" },
+  orbit: { code: "ORBITAL DOMINANCE", title: "星舰火控接管", motif: "starrail", primary: "#e4f8ff", secondary: "#7a8cff", impact: "舰桥锁定后释放贯阵级火力" },
+  mars: { code: "MARTIAN OVERDRIVE", title: "赤星熔核超载", motif: "magma", primary: "#ffe19a", secondary: "#ff603f", impact: "热核撕开岩层并留下熔断带" },
+  moon: { code: "LUNAR GRAVITY LOCK", title: "静海引力锁定", motif: "lunar", primary: "#f1efff", secondary: "#a9a1ff", impact: "月壤抬升后被重力场瞬间压碎" },
+  cultivation: { code: "TAIXU · 天地同律", title: "太虚法相展开", motif: "ink", primary: "#fff0b0", secondary: "#7fffc7", impact: "墨海开天，剑阵与雷劫共鸣落下" },
+};
+
+function getUltimatePresentationProfile(sceneId = game?.scene?.id || "city", classId = game?.player?.combatClass?.id || "ranger") {
+  const theme = ultimateThemePresentations[sceneId] || ultimateThemePresentations.city;
+  const role = sceneClassProfiles[sceneId]?.[classId] || sceneClassProfiles.city.ranger;
+  const roleCode = classId === "melee" ? "BREACH" : classId === "ranger" ? "BARRAGE" : "DOMAIN";
+  return {
+    ...theme,
+    sceneId,
+    classId,
+    signatureId: `${sceneId}-${classId}-${role.ultimateType}`,
+    roleCode,
+    ultimateType: role.ultimateType,
+    ultimateName: role.ultimateName,
+    roleName: role.name,
+  };
+}
 
 // One source of truth for what the player model is visibly holding and how
 // that same object behaves in combat. This keeps every world from falling back
@@ -2030,6 +2059,7 @@ function makeGame(runType = "main") {
     petReviveUsed: false,
     petRescueOverdrive: false,
     ultimate: null,
+    ultimatePresentation: null,
     world: { infinite: true, domainIndex: 0 },
     camera: { zoom: scene.id === "hospital" ? 1.19 : scene.endless ? 1.13 : 1.16 },
     move: { x: 0, y: 0 },
@@ -2048,6 +2078,9 @@ function makeGame(runType = "main") {
       targetFps: PERFORMANCE_PROFILE.targetFps,
       slowFrames: 0,
       frameMs: 1000 / PERFORMANCE_PROFILE.targetFps,
+      renderCostMs: 0,
+      peakRenderCostMs: 0,
+      ultimatePeakRenderMs: 0,
     },
     pulseTimer: 0,
     pulseMax: showcase ? 5 : Math.max(14, 22 * (1 - meta.upgrades.pulse * .035)),
@@ -4416,7 +4449,7 @@ function spawnImpactBurst(x, y, bullet, critical = false, enemy = null, lightwei
 }
 
 function damageUltimateArea(x, y, radius, normalMultiplier, bossMultiplier, knockback = 0) {
-  for (const enemy of [...game.enemies]) {
+  for (const enemy of game.enemies) {
     if (enemy.dead) continue;
     const distance = Math.hypot(enemy.x - x, enemy.y - y);
     if (distance > radius + enemy.size) continue;
@@ -4443,8 +4476,8 @@ function detonateAirstrike(strike) {
   const terrainIntensity = type === "railSalvo" || type === "marsBarrage" ? .88 : .62;
   if (game.performance.quality > .62 || Math.random() < .52) createTerrainDeformation(strike.x, strike.y, radius * .72, { source: "barrage", intensity: terrainIntensity, life: 28, color, cinematic: !game.cinematicImpact });
   game.shockwaves.push({ x: strike.x, y: strike.y, radius: 8, maxRadius: radius + 24, life: .64, color, lineWidth: 6, ellipse: .7 });
-  makeParticles(strike.x, strike.y, color, 36, 320);
-  makeParticles(strike.x, strike.y, type === "antibodyRain" ? "#effff9" : type === "swordRain" ? "#efffea" : "#ffdb7a", 24, 245);
+  makeParticles(strike.x, strike.y, color, LOW_POWER_DEVICE ? 12 : 28, 320);
+  makeParticles(strike.x, strike.y, type === "antibodyRain" ? "#effff9" : type === "swordRain" ? "#efffea" : "#ffdb7a", LOW_POWER_DEVICE ? 7 : 16, 245);
   if (type === "auroraSpears") for (const enemy of game.enemies) if (Math.hypot(enemy.x - strike.x, enemy.y - strike.y) < radius) enemy.slowTimer = Math.max(enemy.slowTimer, 3.5);
   game.shake = Math.max(game.shake, type === "railSalvo" || type === "marsBarrage" ? 17 : 11);
   tone(88, .09, "sawtooth", .035, .55);
@@ -4455,6 +4488,9 @@ function activatePulse() {
   game.pulseTimer = game.pulseMax;
   const player = game.player;
   const type = player.combatClass.ultimateType;
+  const presentation = getUltimatePresentationProfile(game.scene.id, player.combatClass.id);
+  game.ultimatePresentation = { ...presentation, time: 1.7, maxTime: 1.7, rendered: false, stage: "cutIn" };
+  game.performance.ultimatePeakRenderMs = 0;
   const impactTypes = new Set(["breach", "avalanche", "deconRush", "faultline", "moonQuake", "heavenBlade"]);
   const fieldTypes = new Set(["teslaStorm", "blizzard", "sterilePurge", "solarCore", "gravityCollapse", "thunderTribulation"]);
   const subtitles = {
@@ -4482,7 +4518,9 @@ function activatePulse() {
     tone(330, .38, "sine", .06, 2.2);
   } else {
     const enemies = game.enemies.filter((enemy) => !enemy.dead).sort((a, b) => b.maxHp - a.maxHp);
-    const strikeCount = type === "swordRain" || type === "swarmProtocol" ? 18 : 14;
+    const strikeCount = LOW_POWER_DEVICE
+      ? (type === "swordRain" || type === "swarmProtocol" ? 9 : 7)
+      : (type === "swordRain" || type === "swarmProtocol" ? 16 : 12);
     const targets = Array.from({ length: strikeCount }, (_, index) => {
       const enemy = enemies[index % Math.max(1, enemies.length)];
       const angle = index / strikeCount * Math.PI * 2;
@@ -4681,6 +4719,12 @@ function applyEndlessOverflow(id, player) {
 
 function updateEffects(dt) {
   game.rangerFinisherCooldown = Math.max(0, game.rangerFinisherCooldown - dt);
+  if (game.ultimatePresentation) {
+    game.ultimatePresentation.time -= dt;
+    const progress = 1 - Math.max(0, game.ultimatePresentation.time) / game.ultimatePresentation.maxTime;
+    game.ultimatePresentation.stage = progress < .22 ? "cutIn" : progress < .68 ? "release" : "aftermath";
+    if (game.ultimatePresentation.time <= 0) game.ultimatePresentation = null;
+  }
   if (game.rangerFinisher) {
     game.rangerFinisher.time -= dt;
     if (game.rangerFinisher.time <= 0) game.rangerFinisher = null;
@@ -4695,7 +4739,7 @@ function updateEffects(dt) {
       const radius = 215;
       damageUltimateArea(ultimate.x, ultimate.y, radius, 8.5, 4.35, 82);
       createTerrainDeformation(ultimate.x, ultimate.y, radius, { source: "ultimate", intensity: 1.35, life: 58, color: ultimateColor });
-      makeParticles(ultimate.x, ultimate.y, ultimateColor, 72, 410);
+      makeParticles(ultimate.x, ultimate.y, ultimateColor, LOW_POWER_DEVICE ? 22 : 54, 410);
       game.shake = 24;
       tone(72, .22, "sawtooth", .07, .42);
     }
@@ -4704,9 +4748,16 @@ function updateEffects(dt) {
       damageUltimateArea(ultimate.x, ultimate.y, 420, 7.25, 3.85, 58);
       createTerrainDeformation(ultimate.x, ultimate.y, 285, { source: "ultimate", intensity: 1.28, life: 54, color: ultimateColor });
       for (const radius of [190, 320, 455]) game.shockwaves.push({ x: ultimate.x, y: ultimate.y, radius: 18, maxRadius: radius, life: 1.05, maxLife: 1.05, color: ultimateColor, lineWidth: 7, ellipse: .72 });
-      makeParticles(ultimate.x, ultimate.y, ultimateColor, 82, 430);
+      makeParticles(ultimate.x, ultimate.y, ultimateColor, LOW_POWER_DEVICE ? 26 : 58, 430);
       if (ultimate.type === "thunderTribulation" || ultimate.type === "teslaStorm") {
-        for (const enemy of game.enemies.filter((entry) => !entry.dead).slice(0, 12)) game.lightnings.push({ x: enemy.x, y: enemy.y, life: .45, maxLife: .45, seed: rand(0, 99) });
+        const lightningLimit = LOW_POWER_DEVICE ? 5 : 10;
+        let lightningCount = 0;
+        for (const enemy of game.enemies) {
+          if (enemy.dead) continue;
+          game.lightnings.push({ x: enemy.x, y: enemy.y, life: .45, maxLife: .45, seed: rand(0, 99) });
+          lightningCount += 1;
+          if (lightningCount >= lightningLimit) break;
+        }
       }
       game.shake = 16;
       tone(92, .42, "sine", .075, 3.4);
@@ -5614,6 +5665,7 @@ function render() {
     drawVictorySequenceOverlay();
     drawBossPhaseTransitionOverlay();
     drawCinematicImpactOverlay();
+    drawUltimateCinematicOverlay();
     drawBossScreenShock();
     drawMovementGuide();
     drawBanner();
@@ -5879,6 +5931,140 @@ function drawCinematicImpactOverlay() {
   ctx.lineWidth = 1.5 + strength * 3;
   traceBossDangerShape(themedMark, .72); ctx.stroke();
   impact.themeMarkRendered = true;
+  ctx.restore();
+}
+
+function drawUltimateThemeMotif(profile, progress, strength) {
+  const sweep = Math.min(1, progress * 1.8);
+  const cx = W * .69;
+  const cy = H * .34;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.globalAlpha = strength;
+  ctx.strokeStyle = profile.primary;
+  ctx.fillStyle = colorAlpha(profile.secondary, .22);
+  ctx.lineWidth = 2.2;
+  if (profile.motif === "ruin") {
+    for (let index = 0; index < 6; index += 1) {
+      const x = -128 + index * 46;
+      const height = (58 + (index % 3) * 27) * sweep;
+      ctx.fillRect(x, 84 - height, 29, height);
+      ctx.beginPath(); ctx.moveTo(x - 8, 88); ctx.lineTo(x + 11, 62 - height); ctx.lineTo(x + 35, 88); ctx.stroke();
+    }
+    ctx.setLineDash([14, 8]); ctx.beginPath(); ctx.moveTo(-155, -58); ctx.lineTo(158, 58); ctx.stroke(); ctx.setLineDash([]);
+  } else if (profile.motif === "glacier") {
+    for (let index = 0; index < 7; index += 1) {
+      const x = -146 + index * 47;
+      const height = (74 + (index % 4) * 24) * sweep;
+      ctx.beginPath(); ctx.moveTo(x - 19, 90); ctx.lineTo(x, 90 - height); ctx.lineTo(x + 22, 90); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(-165, 19); ctx.bezierCurveTo(-80, -88, 54, 82, 172, -34); ctx.stroke();
+  } else if (profile.motif === "sterile") {
+    ctx.lineWidth = 10; ctx.strokeRect(-47 * sweep, -47 * sweep, 94 * sweep, 94 * sweep);
+    ctx.fillRect(-12, -71 * sweep, 24, 142 * sweep); ctx.fillRect(-71 * sweep, -12, 142 * sweep, 24);
+    ctx.lineWidth = 2;
+    for (let index = 0; index < 5; index += 1) {
+      const y = -75 + index * 37;
+      ctx.beginPath(); ctx.moveTo(-155, y); ctx.bezierCurveTo(-65, y - 31, 64, y + 31, 155, y); ctx.stroke();
+    }
+  } else if (profile.motif === "starrail") {
+    for (let index = 0; index < 8; index += 1) {
+      const angle = index / 8 * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(Math.cos(angle) * 35, Math.sin(angle) * 17); ctx.lineTo(Math.cos(angle) * (120 + sweep * 70), Math.sin(angle) * (58 + sweep * 36)); ctx.stroke();
+    }
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(0, 0, 118 * sweep, 38 * sweep, -.18, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillRect(-155, -4, 310 * sweep, 8);
+  } else if (profile.motif === "magma") {
+    ctx.lineWidth = 6;
+    for (let branch = -2; branch <= 2; branch += 1) {
+      ctx.beginPath(); ctx.moveTo(-160, branch * 21); ctx.lineTo(-82, branch * 13 - 18); ctx.lineTo(-14, branch * 18 + 17); ctx.lineTo(55, branch * 8 - 12); ctx.lineTo(162 * sweep, branch * 19); ctx.stroke();
+    }
+    ctx.fillStyle = colorAlpha(profile.primary, .18); ctx.beginPath(); ctx.arc(72, -62, 61 * sweep, 0, Math.PI * 2); ctx.fill();
+  } else if (profile.motif === "lunar") {
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 38, 136 * sweep, Math.PI, Math.PI * 2); ctx.stroke();
+    for (let index = 0; index < 5; index += 1) {
+      ctx.strokeRect(-138 + index * 56, -75 + (index % 2) * 19, 34, 34);
+      ctx.beginPath(); ctx.moveTo(-121 + index * 56, -41); ctx.lineTo(-121 + index * 56, 82); ctx.stroke();
+    }
+  } else {
+    ctx.lineCap = "round";
+    for (let stroke = 0; stroke < 5; stroke += 1) {
+      ctx.lineWidth = 15 - stroke * 2.4;
+      ctx.globalAlpha = strength * (.25 + stroke * .12);
+      ctx.beginPath(); ctx.moveTo(-164, -72 + stroke * 34); ctx.bezierCurveTo(-74, -104 + stroke * 26, 58, 95 - stroke * 18, 168 * sweep, -49 + stroke * 27); ctx.stroke();
+    }
+    ctx.globalAlpha = strength; ctx.lineWidth = 3;
+    for (let sword = 0; sword < 7; sword += 1) {
+      const x = -102 + sword * 34; ctx.save(); ctx.translate(x, -46 + (sword % 2) * 29); ctx.rotate(-.35 + sword * .1); ctx.fillRect(-2, -44 * sweep, 4, 70 * sweep); ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function drawUltimateHeroCutIn(presentation, reveal, alpha) {
+  const hero = getHeroSprite(presentation.sceneId, presentation.classId);
+  if (!hero?.complete || !hero.naturalWidth || !hero.naturalHeight) return false;
+  const targetWidth = LOW_POWER_DEVICE ? 126 : 150;
+  const targetHeight = LOW_POWER_DEVICE ? 224 : 272;
+  const scale = Math.min(targetWidth / hero.naturalWidth, targetHeight / hero.naturalHeight);
+  const width = hero.naturalWidth * scale;
+  const height = hero.naturalHeight * scale;
+  const x = W - width - 8 + (1 - reveal) * 58;
+  const y = H * .43 - height * .51;
+  ctx.save();
+  ctx.globalAlpha = alpha * (.5 + reveal * .5);
+  if (allowExpensiveGlow()) { ctx.shadowColor = presentation.primary; ctx.shadowBlur = 18; }
+  ctx.drawImage(hero, x, y, width, height);
+  ctx.restore();
+  return true;
+}
+
+function drawUltimateCinematicOverlay() {
+  const presentation = game.ultimatePresentation;
+  if (!presentation) return;
+  const progress = 1 - Math.max(0, presentation.time) / presentation.maxTime;
+  const reveal = Math.min(1, progress / .16);
+  const release = Math.min(1, Math.max(0, progress - .13) / .34);
+  const fade = Math.min(1, presentation.time / .38);
+  const alpha = reveal * fade;
+  presentation.rendered = true;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const shade = LOW_POWER_DEVICE ? "rgba(2,5,9,.7)" : "rgba(2,5,9,.76)";
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, H * .17, W, H * .38);
+  ctx.fillStyle = "rgba(0,0,0,.88)";
+  ctx.fillRect(0, 0, W, 22 * reveal);
+  ctx.fillRect(0, H - 22 * reveal, W, 22 * reveal);
+  ctx.globalCompositeOperation = allowExpensiveGlow() ? "screen" : "source-over";
+  drawUltimateThemeMotif(presentation, release, .28 + release * .5);
+  ctx.globalCompositeOperation = "source-over";
+  presentation.heroRendered = drawUltimateHeroCutIn(presentation, reveal, alpha);
+
+  const panelX = 18 - (1 - reveal) * 54;
+  const panelY = H * .245;
+  ctx.fillStyle = colorAlpha(presentation.secondary, .13);
+  ctx.fillRect(panelX, panelY - 24, 207, 3);
+  ctx.fillStyle = presentation.secondary;
+  ctx.fillRect(panelX, panelY - 24, 62 + release * 118, 3);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = presentation.primary;
+  ctx.font = "950 9px system-ui";
+  ctx.fillText(`${presentation.code} / ${presentation.roleCode}`, panelX, panelY - 34);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "950 24px system-ui";
+  ctx.fillText(presentation.ultimateName, panelX, panelY + 6);
+  ctx.fillStyle = colorAlpha(presentation.primary, .92);
+  ctx.font = "850 12px system-ui";
+  ctx.fillText(`${presentation.title} · ${presentation.roleName}`, panelX, panelY + 28);
+  ctx.fillStyle = "rgba(235,246,255,.72)";
+  ctx.font = "700 9px system-ui";
+  ctx.fillText(presentation.impact, panelX, panelY + 47, 228);
+  ctx.strokeStyle = colorAlpha(presentation.primary, .68);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(panelX, panelY + 60); ctx.lineTo(panelX + 170 * release, panelY + 60); ctx.stroke();
+  presentation.motifRendered = true;
   ctx.restore();
 }
 
@@ -8518,7 +8704,7 @@ function drawThemedUltimate(ultimate) {
   const skin = getEquippedSkin();
   const color = skin.primary;
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
+  ctx.globalCompositeOperation = allowExpensiveGlow() ? "lighter" : "source-over";
   drawUltimateSkinCosmetic(ultimate, progress, skin);
   if (ultimate.family === "impact") {
     ctx.translate(ultimate.x, ultimate.y);
@@ -8562,7 +8748,7 @@ function drawThemedUltimate(ultimate) {
       ctx.strokeStyle=colorAlpha("#d6f4ff",.82);ctx.lineWidth=2.5;
       const nodes=8;for(let i=0;i<nodes;i+=1){const a=i/nodes*Math.PI*2+ambienceTime*.18;const x=Math.cos(a)*radius*.72,y=Math.sin(a)*radius*.5;ctx.fillStyle=colorAlpha("#8ebdff",.8);ctx.fillRect(x-7,y-14,14,28);const next=(i+3)%nodes,nx=Math.cos(next/nodes*Math.PI*2+ambienceTime*.18)*radius*.72,ny=Math.sin(next/nodes*Math.PI*2+ambienceTime*.18)*radius*.5;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo((x+nx)/2+Math.sin(i*8+ambienceTime*12)*18,(y+ny)/2);ctx.lineTo(nx,ny);ctx.stroke();}
     } else if (ultimate.type === "blizzard") {
-      const snow=58;for(let i=0;i<snow;i+=1){const a=i*.91+ambienceTime*(1.8+i%4*.16);const r=(i%snow)/snow*radius;ctx.fillStyle=colorAlpha(i%3?"#dff8ff":"#8cddff",.38+i%4*.12);ctx.beginPath();ctx.arc(Math.cos(a)*r,Math.sin(a)*r*.64,1.4+i%3,0,Math.PI*2);ctx.fill();}ctx.strokeStyle=colorAlpha("#eaffff",.6);ctx.lineWidth=18;ctx.beginPath();ctx.arc(0,0,radius*.62,0,Math.PI*1.65);ctx.stroke();
+      const snow=LOW_POWER_DEVICE?18:42;for(let i=0;i<snow;i+=1){const a=i*.91+ambienceTime*(1.8+i%4*.16);const r=(i%snow)/snow*radius;ctx.fillStyle=colorAlpha(i%3?"#dff8ff":"#8cddff",.38+i%4*.12);ctx.beginPath();ctx.arc(Math.cos(a)*r,Math.sin(a)*r*.64,1.4+i%3,0,Math.PI*2);ctx.fill();}ctx.strokeStyle=colorAlpha("#eaffff",.6);ctx.lineWidth=18;ctx.beginPath();ctx.arc(0,0,radius*.62,0,Math.PI*1.65);ctx.stroke();
     } else if (ultimate.type === "sterilePurge") {
       const glow=ctx.createRadialGradient(0,0,4,0,0,radius);glow.addColorStop(0,colorAlpha("#ffffff",.5));glow.addColorStop(.55,colorAlpha("#72ffd0",.18));glow.addColorStop(1,colorAlpha("#72ffd0",0));ctx.fillStyle=glow;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.fill();
       for(let i=0;i<12;i+=1){const a=i/12*Math.PI*2;ctx.save();ctx.translate(Math.cos(a)*radius*.68,Math.sin(a)*radius*.68);ctx.rotate(a);ctx.fillStyle=colorAlpha("#eafff8",.82);ctx.fillRect(-4,-18,8,36);ctx.fillRect(-18,-4,36,8);ctx.restore();}
@@ -8571,7 +8757,7 @@ function drawThemedUltimate(ultimate) {
     } else if (ultimate.type === "gravityCollapse") {
       const core=30+power*24;const lens=ctx.createRadialGradient(0,0,2,0,0,radius);lens.addColorStop(0,"rgba(0,0,0,.98)");lens.addColorStop(core/radius,"rgba(45,30,90,.92)");lens.addColorStop(.38,"rgba(159,135,255,.23)");lens.addColorStop(1,"rgba(110,90,255,0)");ctx.fillStyle=lens;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.fill();ctx.strokeStyle=colorAlpha("#e4dcff",.8);ctx.lineWidth=4;for(let i=0;i<4;i+=1){ctx.beginPath();ctx.ellipse(0,0,core+35+i*34,(core+35+i*34)*.34,ambienceTime*(i%2?.45:-.35)+i,0,Math.PI*2);ctx.stroke();}
     } else {
-      ctx.fillStyle=colorAlpha("#d8deee",.2);for(let i=0;i<8;i+=1){const a=i/8*Math.PI*2;ctx.beginPath();ctx.ellipse(Math.cos(a)*radius*.45-35,Math.sin(a)*radius*.2-150,120,46,a*.4,0,Math.PI*2);ctx.fill();}ctx.strokeStyle=colorAlpha("#fff4b5",.85);ctx.lineWidth=3;for(let i=0;i<7;i+=1){const x=-radius*.7+i*radius*.23;ctx.beginPath();ctx.moveTo(x-20,-430);ctx.lineTo(x+Math.sin(i*12+ambienceTime*20)*26,-110);ctx.lineTo(x,20);ctx.stroke();}
+      const cloudCount=LOW_POWER_DEVICE?4:8;ctx.fillStyle=colorAlpha("#d8deee",.2);for(let i=0;i<cloudCount;i+=1){const a=i/cloudCount*Math.PI*2;ctx.beginPath();ctx.ellipse(Math.cos(a)*radius*.45-35,Math.sin(a)*radius*.2-150,120,46,a*.4,0,Math.PI*2);ctx.fill();}ctx.strokeStyle=colorAlpha("#fff4b5",.85);ctx.lineWidth=3;const boltCount=LOW_POWER_DEVICE?4:7;for(let i=0;i<boltCount;i+=1){const x=-radius*.7+i*radius*1.4/Math.max(1,boltCount-1);ctx.beginPath();ctx.moveTo(x-20,-430);ctx.lineTo(x+Math.sin(i*12+ambienceTime*20)*26,-110);ctx.lineTo(x,20);ctx.stroke();}
     }
   } else if (ultimate.family === "orbit") {
     ctx.translate(game.player.x, game.player.y);
@@ -8605,7 +8791,7 @@ function drawUltimateSkinCosmetic(ultimate, progress, skin) {
       ctx.beginPath(); ctx.ellipse(0, 0, radius + ring * 24, (radius + ring * 24) * (.42 + ring * .06), ring * .72, 0, Math.PI * 2); ctx.stroke();
     }
   }
-  const count = 5 + tier * 5;
+  const count = LOW_POWER_DEVICE ? 3 + tier * 2 : 5 + tier * 5;
   for (let i = 0; i < count; i += 1) {
     const angle = i / count * Math.PI * 2 + ambienceTime * (i % 2 ? -.5 : .65);
     const distance = radius * (.62 + (i % 3) * .18);
@@ -8617,7 +8803,7 @@ function drawUltimateSkinCosmetic(ultimate, progress, skin) {
     else { ctx.beginPath(); ctx.arc(0, 0, 2 + tier, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
   }
-  if (tier >= 3) {
+  if (tier >= 3 && !LOW_POWER_DEVICE) {
     ctx.lineWidth = 2;
     for (let i = 0; i < 10; i += 1) { ctx.save(); ctx.rotate(i / 10 * Math.PI * 2); ctx.globalAlpha *= .65; ctx.beginPath(); ctx.moveTo(radius * .45, 0); ctx.lineTo(radius * 1.55, 0); ctx.stroke(); ctx.restore(); }
   }
@@ -8627,7 +8813,7 @@ function drawUltimateSkinCosmetic(ultimate, progress, skin) {
 function drawUltimateCarrier(ultimate, progress, color) {
   const x = game.player.x - 330 + progress * 660;
   const y = game.player.y - 235 - Math.sin(progress * Math.PI) * 42;
-  ctx.save();ctx.translate(x,y);ctx.shadowColor=color;ctx.shadowBlur=24;
+  ctx.save();ctx.translate(x,y);if(allowExpensiveGlow()){ctx.shadowColor=color;ctx.shadowBlur=24;}
   if (["droneBarrage","antibodyRain","swarmProtocol"].includes(ultimate.type)) {
     const count=ultimate.type==="swarmProtocol"?7:4;for(let i=0;i<count;i+=1){const ox=(i-(count-1)/2)*34,oy=Math.sin(i*3+ambienceTime*4)*9;ctx.save();ctx.translate(ox,oy);ctx.fillStyle=ultimate.type==="antibodyRain"?"#eafff8":color;ctx.beginPath();ctx.moveTo(19,0);ctx.lineTo(1,-9);ctx.lineTo(-16,-5);ctx.lineTo(-22,0);ctx.lineTo(-16,5);ctx.lineTo(1,9);ctx.closePath();ctx.fill();ctx.strokeStyle="#ffffff";ctx.beginPath();ctx.moveTo(-26,0);ctx.lineTo(26,0);ctx.stroke();ctx.restore();}
   } else if (ultimate.type==="railSalvo") {
@@ -10099,6 +10285,7 @@ function frame(now) {
         : ceiling;
     performanceState.quality += (desiredQuality - performanceState.quality) * .18;
   }
+  const workStartedAt = performance.now();
   try {
     if (mode === "playing" && !paused) update(dt);
     render();
@@ -10113,6 +10300,15 @@ function frame(now) {
       recoverAssetImage(game.scene.id === "cultivation" ? cultivatorEnemyAtlas : game.scene.id === "city" ? cityZombieAtlas : enemyAtlas);
     }
   } finally {
+    if (game) {
+      const workCostMs = performance.now() - workStartedAt;
+      const performanceState = game.performance;
+      performanceState.renderCostMs += (workCostMs - performanceState.renderCostMs) * .16;
+      performanceState.peakRenderCostMs = Math.max(performanceState.peakRenderCostMs, workCostMs);
+      if (game.ultimate || game.ultimatePresentation) performanceState.ultimatePeakRenderMs = Math.max(performanceState.ultimatePeakRenderMs, workCostMs);
+      const workBudgetMs = 1000 / performanceState.targetFps;
+      if (workCostMs > workBudgetMs * .82) performanceState.slowFrames = Math.min(24, performanceState.slowFrames + 1);
+    }
     requestAnimationFrame(frame);
   }
 }
@@ -10459,6 +10655,9 @@ if (QA_MODE) {
         profile: PERFORMANCE_PROFILE.name,
         quality: Number(game.performance.quality.toFixed(2)),
         frameMs: Number(game.performance.frameMs.toFixed(1)),
+        renderCostMs: Number(game.performance.renderCostMs.toFixed(2)),
+        peakRenderCostMs: Number(game.performance.peakRenderCostMs.toFixed(2)),
+        ultimatePeakRenderMs: Number(game.performance.ultimatePeakRenderMs.toFixed(2)),
         targetFps: game.performance.targetFps,
         limits: { ...EFFECT_LIMITS },
       },
@@ -10469,6 +10668,16 @@ if (QA_MODE) {
         move: { x: Number(game.move.x.toFixed(2)), y: Number(game.move.y.toFixed(2)) },
         ultimateActive: Boolean(game.ultimate),
       },
+      ultimatePresentation: game.ultimatePresentation ? {
+        signatureId: game.ultimatePresentation.signatureId,
+        sceneId: game.ultimatePresentation.sceneId,
+        classId: game.ultimatePresentation.classId,
+        motif: game.ultimatePresentation.motif,
+        stage: game.ultimatePresentation.stage,
+        rendered: Boolean(game.ultimatePresentation.rendered),
+        heroRendered: Boolean(game.ultimatePresentation.heroRendered),
+        motifRendered: Boolean(game.ultimatePresentation.motifRendered),
+      } : null,
       bossDanger: {
         active: game.bossWarnings.length,
         overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
@@ -10611,6 +10820,11 @@ if (QA_MODE) {
       if (game.ultimate?.family === "impact") game.ultimate.time = 1.04;
       else if (game.ultimate?.family === "field") game.ultimate.time = 1.44;
       else if (game.ultimate?.family === "barrage") for (const strike of game.airstrikes) strike.delay = Math.min(strike.delay, .08);
+    },
+    resetPerformancePeaks: () => {
+      if (!game) return;
+      game.performance.peakRenderCostMs = 0;
+      game.performance.ultimatePeakRenderMs = 0;
     },
     forceThemeImpact: () => {
       if (!game) return;
