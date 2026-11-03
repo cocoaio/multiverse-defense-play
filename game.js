@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "82";
+const ASSET_REVISION = "83";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -3584,14 +3584,14 @@ function applyAttackIdentity(bullet, enemy, x, y, angle) {
 
 function getBossImpactSpec(sceneId = game.scene.id) {
   return {
-    city: { name: "楼体坍塌", scar: "ruins", color: "#ff744f", particle: "chip" },
-    snow: { name: "冰原崩陷", scar: "snowCrater", color: "#9cecff", particle: "shard" },
-    hospital: { name: "污染爆破", scar: "bioBreach", color: "#ff5d78", particle: "shard" },
-    orbit: { name: "舰体贯穿", scar: "hullBreach", color: "#ff8a62", particle: "chip" },
-    mars: { name: "熔岩轰击", scar: "moltenCrater", color: "#ff743d", particle: "shard" },
-    moon: { name: "月壤震爆", scar: "lunarCrater", color: "#d9d5ff", particle: "shard" },
-    cultivation: { name: "道场碎裂", scar: "spiritRift", color: "#ffd16f", particle: "glyph" },
-  }[sceneId] || { name: "毁灭轰击", scar: "ruins", color: "#ff684f", particle: "shard" };
+    city: { name: "楼体坍塌", scar: "ruins", color: "#ff744f", particle: "chip", telegraph: "collapseGrid" },
+    snow: { name: "冰原崩陷", scar: "snowCrater", color: "#9cecff", particle: "shard", telegraph: "frostFracture" },
+    hospital: { name: "污染爆破", scar: "bioBreach", color: "#ff5d78", particle: "shard", telegraph: "bioSeal" },
+    orbit: { name: "舰体贯穿", scar: "hullBreach", color: "#ff8a62", particle: "chip", telegraph: "bulkheadBreach" },
+    mars: { name: "熔岩轰击", scar: "moltenCrater", color: "#ff743d", particle: "shard", telegraph: "magmaFault" },
+    moon: { name: "月壤震爆", scar: "lunarCrater", color: "#d9d5ff", particle: "shard", telegraph: "lunarTarget" },
+    cultivation: { name: "道场碎裂", scar: "spiritRift", color: "#ffd16f", particle: "glyph", telegraph: "swordMandala" },
+  }[sceneId] || { name: "毁灭轰击", scar: "ruins", color: "#ff684f", particle: "shard", telegraph: "collapseGrid" };
 }
 
 function triggerCinematicImpact(x, y, color, intensity = 1, duration = .78) {
@@ -3698,7 +3698,7 @@ function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
   game.bossWarnings.push({
     x, y, radius, delay, maxDelay: delay, life: 0, sourceId: enemy.id, damage,
     color: impact.color, impactName: impact.name, scarType: impact.scar,
-    particleShape: impact.particle, sceneId: game.scene.id, bossPhase: phase, detonated: false,
+    particleShape: impact.particle, telegraph: impact.telegraph, sceneId: game.scene.id, bossPhase: phase, detonated: false,
   });
 }
 
@@ -3918,7 +3918,7 @@ function updateBossWarnings(dt) {
       warning.life = .68;
       createBossScar(warning);
       makeDirectionalParticles(warning.x, warning.y, warning.color, 56, 340, -Math.PI / 2, Math.PI, warning.particleShape);
-      if (Math.hypot(game.player.x - warning.x, game.player.y - warning.y) <= warning.radius + 13) damagePlayer(warning.damage, warning.x, warning.y, true);
+      if (isPointInsideBossWarning({ ...warning, radius: warning.radius + 13 }, game.player.x, game.player.y)) damagePlayer(warning.damage, warning.x, warning.y, true);
       game.shake = Math.max(game.shake, 19);
       game.bossShock = .78;
       game.flash = Math.max(game.flash, .32);
@@ -6299,6 +6299,109 @@ function drawBossScar(scar) {
   ctx.restore();
 }
 
+function getBossDangerPolygon(warning, scale = 1) {
+  const r = warning.radius * scale;
+  const shape = warning.telegraph || getBossImpactSpec(warning.sceneId).telegraph;
+  if (shape === "collapseGrid") {
+    const c = r * .22;
+    return [[-r + c, -r], [r - c, -r], [r, -r + c], [r, r - c], [r - c, r], [-r + c, r], [-r, r - c], [-r, -r + c]];
+  } else if (shape === "bulkheadBreach") {
+    const x = r * 1.15; const y = r; const c = r * .28;
+    return [[-x + c, -y], [x - c, -y], [x, -y + c], [x, y - c], [x - c, y], [-x + c, y], [-x, y - c], [-x, -y + c]];
+  } else if (shape === "lunarTarget") {
+    return null;
+  }
+  const pointCount = shape === "frostFracture" ? 6 : shape === "bioSeal" ? 12 : shape === "magmaFault" ? 10 : 8;
+  const outer = shape === "frostFracture" ? 1.17 : shape === "magmaFault" ? 1.12 : 1.1;
+  return Array.from({ length: pointCount }, (_, index) => {
+    const angle = -Math.PI / 2 + index / pointCount * Math.PI * 2;
+    const rough = shape === "magmaFault" ? .97 + scarNoise(warning.sourceId || 1, index) * .09 : 1;
+    const distance = r * outer * rough;
+    return [Math.cos(angle) * distance, Math.sin(angle) * distance];
+  });
+}
+
+function traceBossDangerShape(warning, scale = 1) {
+  const polygon = getBossDangerPolygon(warning, scale);
+  const r = warning.radius * scale;
+  ctx.beginPath();
+  if (!polygon) {
+    ctx.ellipse(0, 0, r * 1.07, r * 1.02, 0, 0, Math.PI * 2);
+    return;
+  }
+  polygon.forEach(([x, y], index) => { if (!index) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+  ctx.closePath();
+}
+
+function isPointInsideBossWarning(warning, x, y) {
+  const localX = x - warning.x;
+  const localY = y - warning.y;
+  const polygon = getBossDangerPolygon(warning);
+  if (!polygon) return (localX * localX) / ((warning.radius * 1.07) ** 2) + (localY * localY) / ((warning.radius * 1.02) ** 2) <= 1;
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const [cx, cy] = polygon[current];
+    const [px, py] = polygon[previous];
+    if (((cy > localY) !== (py > localY)) && localX < (px - cx) * (localY - cy) / (py - cy || .0001) + cx) inside = !inside;
+  }
+  return inside;
+}
+
+function drawBossDangerMotif(warning, charge) {
+  const r = warning.radius;
+  const shape = warning.telegraph || getBossImpactSpec(warning.sceneId).telegraph;
+  const detail = game.performance.quality < .65 ? .65 : 1;
+  ctx.save();
+  ctx.globalAlpha = .22 + charge * .5;
+  ctx.strokeStyle = colorAlpha(warning.color, .82);
+  ctx.fillStyle = colorAlpha(warning.color, .24);
+  ctx.lineWidth = 1.5 + charge * 1.5;
+  if (shape === "collapseGrid") {
+    const step = r * .38;
+    for (let index = -2; index <= 2; index += 1) {
+      ctx.beginPath(); ctx.moveTo(index * step, -r * .8); ctx.lineTo(index * step, r * .8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * .8, index * step); ctx.lineTo(r * .8, index * step); ctx.stroke();
+    }
+    ctx.fillStyle = colorAlpha("#ffd064", .4 + charge * .3);
+    for (let index = 0; index < 4; index += 1) ctx.fillRect(-r * .82 + index * r * .53, -r * .92, r * .25, r * .07);
+  } else if (shape === "frostFracture") {
+    for (let index = 0; index < 6; index += 1) {
+      const angle = index / 6 * Math.PI * 2;
+      ctx.save(); ctx.rotate(angle); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r * .88); ctx.stroke();
+      if (detail === 1) for (let branch = 1; branch <= 3; branch += 1) {
+        const y = -r * (.2 + branch * .18); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(-r * .13, y - r * .13); ctx.moveTo(0, y); ctx.lineTo(r * .13, y - r * .13); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  } else if (shape === "bioSeal") {
+    ctx.lineWidth = r * .11; ctx.beginPath(); ctx.moveTo(-r * .58, 0); ctx.lineTo(r * .58, 0); ctx.moveTo(0, -r * .58); ctx.lineTo(0, r * .58); ctx.stroke();
+    ctx.lineWidth = 2;
+    for (let index = 0; index < 3; index += 1) { ctx.beginPath(); ctx.arc(0, 0, r * (.28 + index * .2), index * .8, index * .8 + Math.PI * 1.25); ctx.stroke(); }
+  } else if (shape === "bulkheadBreach") {
+    for (let index = -2; index <= 2; index += 1) { const y = index * r * .31; ctx.beginPath(); ctx.moveTo(-r * 1.02, y); ctx.lineTo(-r * .52, y); ctx.moveTo(r * .52, y); ctx.lineTo(r * 1.02, y); ctx.stroke(); }
+    ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(0, 0, r * (.22 + charge * .22), r * (.7 - charge * .28), 0, 0, Math.PI * 2); ctx.stroke();
+  } else if (shape === "magmaFault") {
+    const cracks = detail === 1 ? 8 : 5;
+    for (let index = 0; index < cracks; index += 1) {
+      const angle = index / cracks * Math.PI * 2 + scarNoise(warning.sourceId || 2, index) * .35;
+      ctx.beginPath(); ctx.moveTo(Math.cos(angle) * r * .12, Math.sin(angle) * r * .12);
+      ctx.lineTo(Math.cos(angle + .15) * r * .48, Math.sin(angle + .15) * r * .48);
+      ctx.lineTo(Math.cos(angle - .07) * r * .92, Math.sin(angle - .07) * r * .92); ctx.stroke();
+    }
+  } else if (shape === "lunarTarget") {
+    for (let index = 0; index < 3; index += 1) { ctx.beginPath(); ctx.ellipse((index - 1) * r * .22, (index % 2) * r * .12, r * (.18 + index * .08), r * (.11 + index * .05), index * .4, 0, Math.PI * 2); ctx.stroke(); }
+    for (let index = 0; index < 8; index += 1) { const angle = index / 8 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(angle) * r * .68, Math.sin(angle) * r * .68); ctx.lineTo(Math.cos(angle) * r * .94, Math.sin(angle) * r * .94); ctx.stroke(); }
+  } else {
+    for (let index = 0; index < 8; index += 1) {
+      const angle = index / 8 * Math.PI * 2 + ambienceTime * .08;
+      ctx.save(); ctx.rotate(angle); ctx.translate(0, -r * .62); ctx.fillRect(-r * .03, -r * .22, r * .06, r * .35); ctx.beginPath(); ctx.moveTo(0, -r * .32); ctx.lineTo(-r * .09, -r * .18); ctx.lineTo(r * .09, -r * .18); ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+    ctx.font = `900 ${Math.round(r * .25)}px serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = colorAlpha("#fff0b0", .65 + charge * .25); ctx.fillText("镇", 0, 1);
+  }
+  warning.motifRendered = true;
+  ctx.restore();
+}
+
 function drawBossWarning(warning) {
   const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
   const pulse = .55 + Math.sin(ambienceTime * 24) * .22;
@@ -6308,14 +6411,15 @@ function drawBossWarning(warning) {
   dangerGradient.addColorStop(.72, colorAlpha(warning.color, warning.detonated ? .26 : .05 + charge * .14));
   dangerGradient.addColorStop(1, colorAlpha(warning.color, warning.detonated ? .08 : .01));
   ctx.fillStyle = dangerGradient;
-  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.fill();
+  traceBossDangerShape(warning); ctx.fill();
+  drawBossDangerMotif(warning, charge);
   ctx.strokeStyle = colorAlpha(warning.color, warning.detonated ? .95 : pulse + charge * .2);
   ctx.shadowColor = warning.color; ctx.shadowBlur = 8 + charge * 16;
   ctx.lineWidth = warning.detonated ? 9 : 4; ctx.setLineDash(warning.detonated ? [] : [12, 8]);
-  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  traceBossDangerShape(warning); ctx.stroke(); ctx.setLineDash([]);
   if (!warning.detonated) {
     ctx.strokeStyle = colorAlpha("#ffffff", .65 + charge * .25); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0, 0, warning.radius * (.82 - charge * .68), 0, Math.PI * 2); ctx.stroke();
+    traceBossDangerShape(warning, .82 - charge * .68); ctx.stroke();
     for (let i = 0; i < 12; i += 1) {
       const angle = i / 12 * Math.PI * 2 + ambienceTime * .35;
       ctx.save(); ctx.rotate(angle); ctx.translate(warning.radius + 7, 0);
@@ -6323,8 +6427,8 @@ function drawBossWarning(warning) {
       ctx.beginPath(); ctx.moveTo(-7, -5); ctx.lineTo(3, 0); ctx.lineTo(-7, 5); ctx.closePath(); ctx.fill(); ctx.restore();
     }
     ctx.shadowBlur = 0; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(7,8,12,.82)"; ctx.beginPath(); ctx.arc(0, 0, 33, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = colorAlpha(warning.color, .88); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 33, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "rgba(7,8,12,.82)"; traceBossDangerShape(warning, 33 / warning.radius); ctx.fill();
+    ctx.strokeStyle = colorAlpha(warning.color, .88); ctx.lineWidth = 2; traceBossDangerShape(warning, 33 / warning.radius); ctx.stroke();
     ctx.fillStyle = "#ffffff"; ctx.font = "900 18px system-ui"; ctx.fillText(Math.max(0, warning.delay).toFixed(1), 0, -7);
     ctx.fillStyle = warning.color; ctx.font = "900 10px system-ui"; ctx.fillText(warning.impactName, 0, 11);
     ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.font = "800 10px system-ui";
@@ -6350,19 +6454,19 @@ function drawBossWarningOverlay(warning) {
   // bright ultimates and the max-power tutorial alike.
   ctx.strokeStyle = "rgba(8,5,9,.86)";
   ctx.lineWidth = warning.detonated ? 12 : 9;
-  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.stroke();
+  traceBossDangerShape(warning); ctx.stroke();
   ctx.strokeStyle = warning.detonated ? "#ffffff" : warning.color;
   ctx.lineWidth = warning.detonated ? 6 : 4;
   ctx.setLineDash(warning.detonated ? [] : [18, 8]);
   ctx.lineDashOffset = -ambienceTime * (18 + charge * 42);
-  ctx.beginPath(); ctx.arc(0, 0, warning.radius, 0, Math.PI * 2); ctx.stroke();
+  traceBossDangerShape(warning); ctx.stroke();
   ctx.setLineDash([]);
 
   if (!warning.detonated) {
     ctx.shadowBlur = 0;
     ctx.strokeStyle = "rgba(255,255,255,.92)";
     ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(0, 0, countdownRadius, 0, Math.PI * 2); ctx.stroke();
+    traceBossDangerShape(warning, countdownRadius / warning.radius); ctx.stroke();
     for (let index = 0; index < 8; index += 1) {
       const angle = index / 8 * Math.PI * 2 + ambienceTime * .55;
       ctx.save();
@@ -10228,6 +10332,8 @@ if (QA_MODE) {
       bossDanger: {
         active: game.bossWarnings.length,
         overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
+        motifRendered: game.bossWarnings.some((warning) => warning.motifRendered),
+        telegraphs: [...new Set(game.bossWarnings.map((warning) => warning.telegraph).filter(Boolean))],
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
       },
       bossPhase: game.boss ? {
