@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "85";
+const ASSET_REVISION = "86";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -485,6 +485,14 @@ const ui = {
   sceneProgressText: $("#sceneProgressText"),
   levelGrid: $("#levelGrid"),
   levelModifier: $("#levelModifier"),
+  missionDossier: $("#missionDossier"),
+  dossierTitle: $("#dossierTitle"),
+  dossierThreat: $("#dossierThreat"),
+  dossierObjective: $("#dossierObjective"),
+  dossierBoss: $("#dossierBoss"),
+  dossierReward: $("#dossierReward"),
+  dossierModifier: $("#dossierModifier"),
+  dossierThreatFill: $("#dossierThreatFill"),
   startText: $("#startButtonText"),
   startHint: $("#startButtonHint"),
   resultBadge: $("#resultBadge"),
@@ -1942,6 +1950,13 @@ function saveMeta() {
 
 function getLevelModifier(level) {
   return levelModifiers.find((modifier) => level <= modifier.max) || levelModifiers.at(-1);
+}
+
+function getMissionRewardCopy(level, scene) {
+  if (scene.endless) return "境界突破 · 无限灵蕴";
+  if (level === LEVELS_PER_SCENE) return "章节核心 · 高阶装备";
+  if (level % 3 === 0) return "战备节点 · 品质加成";
+  return "战备币 · 职业装备";
 }
 
 function isSceneUnlocked(index) {
@@ -5463,6 +5478,7 @@ function renderSceneMap() {
   const modifier = getLevelModifier(selectedLevel);
   document.querySelector("#app").dataset.scene = scene.id;
   document.querySelector("#lobbyStage")?.style.setProperty("--lobby-bg", `url("${getResolvedAssetUrl(`./assets/fallback/${scene.id}-battlefield-v1.jpg`)}")`);
+  ui.sceneCard.style.setProperty("--scene-card-bg", `url("${getResolvedAssetUrl(`./assets/fallback/${scene.id}-battlefield-v1.jpg`)}")`);
   if (ui.sceneIcon) ui.sceneIcon.textContent = scene.icon;
   ui.chapter.textContent = scene.chapter;
   ui.sceneName.textContent = scene.name;
@@ -5484,17 +5500,33 @@ function renderSceneMap() {
     const levelUnlocked = isLevelUnlocked(selectedSceneIndex, level);
     const button = document.createElement("button");
     button.className = `level-node${completed ? " completed" : ""}${level === selectedLevel ? " selected" : ""}${!levelUnlocked ? " locked" : ""}`;
-    button.textContent = scene.endless ? "∞ 进入无尽修行" : String(level).padStart(2, "0");
+    const nodeKind = scene.endless ? "endless" : level === LEVELS_PER_SCENE ? "boss" : level % 3 === 0 ? "checkpoint" : "mission";
+    button.dataset.kind = nodeKind;
+    button.dataset.phase = String(Math.max(1, Math.ceil(level / 3)));
+    button.innerHTML = scene.endless
+      ? `<i>∞</i><span><b>进入无尽修行</b><small>地域轮换 · 境界无限</small></span><em>›</em>`
+      : `<i>${String(level).padStart(2, "0")}</i><span><b>${level === LEVELS_PER_SCENE ? "章节决战" : getLevelModifier(level).name}</b><small>${levelUnlocked ? completed ? "已收复" : level % 3 === 0 ? "战备节点" : "待执行" : "情报锁定"}</small></span>${level === LEVELS_PER_SCENE ? "<em>首领</em>" : ""}`;
     button.disabled = !levelUnlocked;
     button.setAttribute("aria-label", `${scene.name}第${level}关${completed ? "，已完成" : levelUnlocked ? "" : "，未解锁"}`);
     if (levelUnlocked) button.addEventListener("click", () => selectLevel(level));
     ui.levelGrid.append(button);
   }
 
+  const threatTier = scene.endless ? 5 : Math.min(5, 1 + Math.floor((selectedSceneIndex * LEVELS_PER_SCENE + selectedLevel - 1) / 15));
+  const threatGlyph = "ⅠⅡⅢⅣⅤ"[threatTier - 1];
+  const missionTarget = 26 + selectedSceneIndex * 6 + selectedLevel * 3;
+  ui.missionDossier.classList.toggle("endless", Boolean(scene.endless));
+  ui.dossierTitle.textContent = scene.endless ? "无尽 · 太虚轮回" : `${String(selectedSceneIndex + 1).padStart(2, "0")}-${String(selectedLevel).padStart(2, "0")} · ${modifier.name}`;
+  ui.dossierThreat.textContent = `威胁 ${threatGlyph}`;
+  ui.dossierObjective.textContent = scene.endless ? "突破境界并击败轮换宗主" : `击杀 ${missionTarget} 名${scene.enemy}`;
+  ui.dossierBoss.textContent = `首领：${scene.boss}`;
+  ui.dossierReward.textContent = getMissionRewardCopy(selectedLevel, scene);
+  ui.dossierModifier.textContent = scene.endless ? "三条命 · 修为动态匹配" : `${modifier.detail} · ${selectedLevel === LEVELS_PER_SCENE ? "首领强化" : "动态战力校准"}`;
+  ui.dossierThreatFill.style.width = `${threatTier / 5 * 100}%`;
+
   ui.start.disabled = !isLevelUnlocked(selectedSceneIndex, selectedLevel);
   ui.startText.textContent = unlocked ? (scene.endless ? "踏入太虚仙域" : `开始 ${String(selectedSceneIndex + 1).padStart(2, "0")}-${String(selectedLevel).padStart(2, "0")}`) : "章节尚未解锁";
   const energyCost = getRunEnergyCost("main");
-  const missionTarget = 26 + selectedSceneIndex * 6 + selectedLevel * 3;
   ui.startHint.textContent = unlocked ? (scene.endless ? `消耗 ${energyCost} 体力 · 三条命 · 无尽挑战` : `消耗 ${energyCost} 体力 · 任务击杀 ${missionTarget} · ${modifier.name}`) : getSceneLockedMessage(selectedSceneIndex);
 }
 
