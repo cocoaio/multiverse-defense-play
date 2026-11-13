@@ -2197,6 +2197,7 @@ function makeGame(runType = "main") {
     victorySequence: null,
     bossCinematic: null,
     bossPhaseOverlayRendered: false,
+    combatMessageDirector: null,
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
@@ -2647,7 +2648,7 @@ function update(dt) {
   game.player.muzzle = Math.max(0, game.player.muzzle - dt * 8);
   const attackPlaybackRate = game.player.combatClass.id === "melee" ? 2.5 : 3.8;
   game.player.attackAnim = Math.max(0, game.player.attackAnim - dt * attackPlaybackRate);
-  game.banner.time = Math.max(0, game.banner.time - dt);
+  if (game.banner?.time) game.banner.time = Math.max(0, game.banner.time - dt);
   updateBossCinematic(dt);
   game.comboTimer -= dt;
   if (game.comboTimer <= 0) game.combo = 0;
@@ -5914,6 +5915,16 @@ function render() {
   drawBackground();
 
   if (game) {
+    game.combatMessageDirector = {
+      primary: null,
+      deferred: [],
+      fullCards: 0,
+      compactCards: 0,
+      primaryBounds: null,
+      compactBounds: [],
+      overlapFree: true,
+      theme: game.scene.id,
+    };
     ctx.save();
     if (!preferences.reduceMotion && game.shake > 0) ctx.translate(rand(-game.shake, game.shake), rand(-game.shake, game.shake));
     drawBattlefield();
@@ -6185,6 +6196,12 @@ function drawBossPhaseTransitionOverlay() {
     const bestClearance = Math.min(Math.abs(bestCenter - screenBossY), Math.abs(bestCenter - screenPlayerY));
     return candidateClearance > bestClearance ? candidate : best;
   }, panelCandidates[0]);
+  const director = game.combatMessageDirector;
+  if (director) {
+    director.primary = "boss-phase";
+    director.fullCards = 1;
+    director.primaryBounds = { x: panelX, y: panelY, width: panelWidth, height: panelHeight };
+  }
   const slide = preferences.reduceMotion ? 0 : (1 - Math.min(1, progress * 4)) * 28;
   ctx.globalAlpha = alpha;
   ctx.fillStyle = `rgba(3,6,12,${LOW_POWER_DEVICE ? .84 : .76})`;
@@ -11179,26 +11196,121 @@ function drawFloater(floater) {
   ctx.restore();
 }
 
+function combatMessageRectOverlap(first, second, padding = 0) {
+  if (!first || !second) return false;
+  return first.x < second.x + second.width + padding
+    && first.x + first.width + padding > second.x
+    && first.y < second.y + second.height + padding
+    && first.y + first.height + padding > second.y;
+}
+
+function trimCombatMessage(text, maxWidth) {
+  const value = String(text || "");
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  let end = value.length;
+  while (end > 1 && ctx.measureText(`${value.slice(0, end)}…`).width > maxWidth) end -= 1;
+  return `${value.slice(0, end)}…`;
+}
+
+function drawCombatMessageMotif(sceneId, x, y, color, compact = false) {
+  const scale = compact ? .78 : 1;
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+  ctx.strokeStyle = color; ctx.fillStyle = colorAlpha(color, .16); ctx.lineWidth = 1.5;
+  if (sceneId === "snow") {
+    for (let arm = 0; arm < 3; arm += 1) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.moveTo(5, -3); ctx.lineTo(9, 0); ctx.lineTo(5, 3); ctx.stroke(); }
+  } else if (sceneId === "hospital") {
+    ctx.fillRect(-3, -10, 6, 20); ctx.fillRect(-10, -3, 20, 6);
+  } else if (["orbit", "mars", "moon"].includes(sceneId)) {
+    ctx.beginPath(); ctx.ellipse(0, 0, 12, 5, -.3, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, sceneId === "moon" ? 4 : 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(10, -4, 2, 0, Math.PI * 2); ctx.fill();
+  } else if (sceneId === "cultivation") {
+    ctx.beginPath(); ctx.moveTo(-2, -12); ctx.lineTo(3, -2); ctx.lineTo(1, 10); ctx.lineTo(-3, 13); ctx.lineTo(-4, -2); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 1, 13, -.55, .55); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(-11, -8); ctx.lineTo(3, -8); ctx.lineTo(11, 0); ctx.lineTo(3, 8); ctx.lineTo(-11, 8); ctx.lineTo(-4, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function chooseCompactCombatMessageBounds(width, height, primaryBounds) {
+  const margin = 12;
+  const yTop = Math.max(220, Math.min(H - height - 152, H * .285));
+  const yBottom = Math.max(yTop, H - height - 164);
+  const candidates = [
+    { x: W - width - margin, y: yTop, width, height },
+    { x: margin, y: yTop, width, height },
+    { x: W - width - margin, y: yBottom, width, height },
+    { x: margin, y: yBottom, width, height },
+  ];
+  const zoom = game.camera?.zoom || 1;
+  const actors = [game.player, game.boss].filter(Boolean).map((actor) => ({
+    x: W / 2 + (actor.x - game.player.x) * zoom,
+    y: H / 2 + (actor.y - game.player.y) * zoom,
+  }));
+  return candidates.reduce((best, candidate) => {
+    const score = (rect) => {
+      if (combatMessageRectOverlap(rect, primaryBounds, 12)) return -100000;
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      return Math.min(...actors.map((actor) => Math.hypot(centerX - actor.x, centerY - actor.y)), 9999);
+    };
+    return score(candidate) > score(best) ? candidate : best;
+  }, candidates[0]);
+}
+
 function drawBanner() {
-  if (!game.banner.time) return;
-  const alpha = Math.min(1, game.banner.time * 1.8, (2.3 - game.banner.time) * 2.5);
+  const banner = game.banner;
+  if (!banner?.time) return;
+  if (!Number.isFinite(banner.maxTime)) banner.maxTime = banner.time;
+  const reveal = Math.min(1, Math.max(.14, (banner.maxTime - banner.time) * 7));
+  const alpha = Math.min(1, banner.time * 1.8, reveal);
+  const director = game.combatMessageDirector || { primary: null, deferred: [], fullCards: 0, compactCards: 0, compactBounds: [] };
+  const phaseIsPrimary = director.primary === "boss-phase";
+  const accent = game.scene.colors.shot;
   ctx.save();
   ctx.globalAlpha = Math.max(0, alpha);
-  const y = 187;
-  const gradient = ctx.createLinearGradient(20, 0, W - 20, 0);
-  gradient.addColorStop(0, "rgba(6,15,9,0)");
-  gradient.addColorStop(0.25, "rgba(7,17,11,.75)");
-  gradient.addColorStop(0.75, "rgba(7,17,11,.75)");
-  gradient.addColorStop(1, "rgba(6,15,9,0)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(34, y - 27, W - 68, 55);
-  ctx.fillStyle = (!game.scene.endless && game.wave === TOTAL_WAVES) || game.boss ? "#ff8d7d" : game.scene.colors.shot;
-  ctx.font = "900 18px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText(game.banner.text, W / 2, y - 1);
-  ctx.fillStyle = "#aab6ad";
-  ctx.font = "500 9px system-ui";
-  ctx.fillText(game.banner.sub, W / 2, y + 15);
+
+  if (phaseIsPrimary) {
+    const width = Math.min(178, W - 28);
+    const height = 50;
+    const bounds = chooseCompactCombatMessageBounds(width, height, director.primaryBounds);
+    director.deferred.push({ type: "battle-banner", text: banner.text });
+    director.compactCards += 1;
+    director.compactBounds.push(bounds);
+    director.overlapFree = !combatMessageRectOverlap(bounds, director.primaryBounds, 8);
+    const rail = ctx.createLinearGradient(bounds.x, 0, bounds.x + bounds.width, 0);
+    rail.addColorStop(0, "rgba(4,8,13,.94)"); rail.addColorStop(1, colorAlpha(accent, .17));
+    ctx.fillStyle = rail; ctx.beginPath(); ctx.roundRect(bounds.x, bounds.y, bounds.width, bounds.height, 5); ctx.fill();
+    ctx.fillStyle = accent; ctx.fillRect(bounds.x, bounds.y, 3, bounds.height);
+    ctx.strokeStyle = colorAlpha(accent, .58); ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(bounds.x, bounds.y, bounds.width, bounds.height, 5); ctx.stroke();
+    drawCombatMessageMotif(game.scene.id, bounds.x + 19, bounds.y + 25, accent, true);
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillStyle = colorAlpha(accent, .92); ctx.font = "850 8px system-ui"; ctx.fillText("战术信息 · 已收束", bounds.x + 37, bounds.y + 12);
+    ctx.fillStyle = "#f3f7f8"; ctx.font = "900 11px system-ui"; ctx.fillText(trimCombatMessage(banner.text, bounds.width - 49), bounds.x + 37, bounds.y + 27);
+    ctx.fillStyle = "rgba(210,221,226,.7)"; ctx.font = "600 7px system-ui"; ctx.fillText(trimCombatMessage(banner.sub, bounds.width - 49), bounds.x + 37, bounds.y + 40);
+    ctx.fillStyle = colorAlpha(accent, .8); ctx.fillRect(bounds.x + 3, bounds.y + height - 2, (bounds.width - 3) * Math.max(0, banner.time / banner.maxTime), 2);
+    ctx.restore();
+    return;
+  }
+
+  director.primary = "battle-banner";
+  director.fullCards += 1;
+  const width = Math.min(326, W - 34);
+  const height = 58;
+  const x = (W - width) / 2;
+  const y = 157;
+  director.primaryBounds = { x, y, width, height };
+  const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
+  gradient.addColorStop(0, "rgba(3,7,11,.9)"); gradient.addColorStop(.68, "rgba(5,10,15,.84)"); gradient.addColorStop(1, colorAlpha(accent, .2));
+  ctx.fillStyle = gradient; ctx.beginPath(); ctx.roundRect(x, y, width, height, 5); ctx.fill();
+  ctx.fillStyle = accent; ctx.fillRect(x, y, 4, height);
+  ctx.strokeStyle = colorAlpha(accent, .52); ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x, y, width, height, 5); ctx.stroke();
+  drawCombatMessageMotif(game.scene.id, x + 27, y + 29, accent);
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.fillStyle = colorAlpha(accent, .9); ctx.font = "850 8px system-ui"; ctx.fillText("COMBAT DIRECTIVE · 战场指令", x + 48, y + 13);
+  ctx.fillStyle = "#f7f9fa"; ctx.font = "950 15px system-ui"; ctx.fillText(trimCombatMessage(banner.text, width - 62), x + 48, y + 31);
+  ctx.fillStyle = "rgba(205,216,221,.76)"; ctx.font = "650 8px system-ui"; ctx.fillText(trimCombatMessage(banner.sub, width - 62), x + 48, y + 46);
   ctx.restore();
 }
 
@@ -11945,6 +12057,16 @@ if (QA_MODE) {
         damageMode: getBossDamageProfile().mode,
         damageLabel: getBossDamageProfile().label,
         damageRendered: Boolean(game.boss.bossDamageRendered && game.boss.bossDamageBackRendered && game.boss.bossDamageFrontRendered),
+      } : null,
+      combatMessageDirector: game.combatMessageDirector ? {
+        primary: game.combatMessageDirector.primary,
+        deferred: game.combatMessageDirector.deferred.map((message) => message.type),
+        fullCards: game.combatMessageDirector.fullCards,
+        compactCards: game.combatMessageDirector.compactCards,
+        overlapFree: game.combatMessageDirector.overlapFree,
+        primaryBounds: game.combatMessageDirector.primaryBounds,
+        compactBounds: game.combatMessageDirector.compactBounds,
+        theme: game.combatMessageDirector.theme,
       } : null,
       bossCinematic: game.bossCinematic ? {
         type: game.bossCinematic.type,
