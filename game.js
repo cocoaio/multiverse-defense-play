@@ -3971,7 +3971,7 @@ function resolveEnemyAttack(enemy) {
   enemy.attackRecoveryMax = enemy.attackRecovery;
 }
 
-function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
+function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase, strikeIndex = 0, strikeCount = 1) {
   const direction = Math.atan2(y - enemy.y, x - enemy.x);
   const profile = getBossAttackBridgeProfile(game.scene.id);
   game.bossWarnings.push({
@@ -3979,6 +3979,9 @@ function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
     sourceX: enemy.x + Math.cos(direction) * enemy.size * .42,
     sourceY: enemy.y + Math.sin(direction) * enemy.size * .34,
     bridgeMotif: profile.motif,
+    strikeIndex,
+    strikeCount,
+    warningRole: strikeIndex === 0 ? "primary" : "secondary",
     color: impact.color, impactName: impact.name, scarType: impact.scar,
     particleShape: impact.particle, telegraph: impact.telegraph, sceneId: game.scene.id, bossPhase: phase, detonated: false,
   });
@@ -4063,9 +4066,9 @@ function updateEnemies(dt) {
       const attackAngle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
       const sideX = -Math.sin(attackAngle);
       const sideY = Math.cos(attackAngle);
-      queueBossStrike(enemy, targetX, targetY, radius, delay, damage, impact, phase);
-      if (phase >= 2) queueBossStrike(enemy, targetX + sideX * radius * .94, targetY + sideY * radius * .94, radius * .82, delay + .12, damage, impact, phase);
-      if (phase >= 3) queueBossStrike(enemy, targetX - sideX * radius * .94, targetY - sideY * radius * .94, radius * .82, delay + .24, damage, impact, phase);
+      queueBossStrike(enemy, targetX, targetY, radius, delay, damage, impact, phase, 0, phase);
+      if (phase >= 2) queueBossStrike(enemy, targetX + sideX * radius * .94, targetY + sideY * radius * .94, radius * .82, delay + .12, damage, impact, phase, 1, phase);
+      if (phase >= 3) queueBossStrike(enemy, targetX - sideX * radius * .94, targetY - sideY * radius * .94, radius * .82, delay + .24, damage, impact, phase, 2, phase);
       if (enemy.bossSkillIndex % 2 === 0) {
         const summonAngle = attackAngle + Math.PI + (enemy.bossSkillIndex % 4 - 1.5) * .42;
         spawnEnemy(Math.random() < .5 ? "ranged" : "caster", enemy.x + Math.cos(summonAngle) * 152, enemy.y + Math.sin(summonAngle) * 112);
@@ -7179,8 +7182,9 @@ function drawBossDangerMotif(warning, charge) {
   const r = warning.radius;
   const shape = warning.telegraph || getBossImpactSpec(warning.sceneId).telegraph;
   const detail = game.performance.quality < .65 ? .65 : 1;
+  const secondary = warning.warningRole === "secondary";
   ctx.save();
-  ctx.globalAlpha = .22 + charge * .5;
+  ctx.globalAlpha = secondary ? .08 + charge * .2 : .16 + charge * .38;
   ctx.strokeStyle = colorAlpha(warning.color, .82);
   ctx.fillStyle = colorAlpha(warning.color, .24);
   ctx.lineWidth = 1.5 + charge * 1.5;
@@ -7356,41 +7360,44 @@ function drawBossAttackBridge(warning, layer = "ground") {
 function drawBossWarning(warning) {
   const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
   const pulse = .55 + Math.sin(ambienceTime * 24) * .22;
+  const secondary = warning.warningRole === "secondary";
   ctx.save(); ctx.translate(warning.x, warning.y);
   const dangerGradient = ctx.createRadialGradient(0, 0, 3, 0, 0, warning.radius);
-  dangerGradient.addColorStop(0, colorAlpha(warning.color, warning.detonated ? .5 : .08 + charge * .24));
-  dangerGradient.addColorStop(.72, colorAlpha(warning.color, warning.detonated ? .26 : .05 + charge * .14));
+  dangerGradient.addColorStop(0, colorAlpha(warning.color, warning.detonated ? .34 : secondary ? .018 + charge * .035 : .025 + charge * .055));
+  dangerGradient.addColorStop(.58, colorAlpha(warning.color, warning.detonated ? .22 : secondary ? .025 + charge * .055 : .04 + charge * .09));
+  dangerGradient.addColorStop(.82, colorAlpha(warning.color, warning.detonated ? .16 : secondary ? .05 + charge * .07 : .07 + charge * .12));
   dangerGradient.addColorStop(1, colorAlpha(warning.color, warning.detonated ? .08 : .01));
   ctx.fillStyle = dangerGradient;
   traceBossDangerShape(warning); ctx.fill();
   drawBossDangerMotif(warning, charge);
   ctx.strokeStyle = colorAlpha(warning.color, warning.detonated ? .95 : pulse + charge * .2);
-  ctx.shadowColor = warning.color; ctx.shadowBlur = 8 + charge * 16;
-  ctx.lineWidth = warning.detonated ? 9 : 4; ctx.setLineDash(warning.detonated ? [] : [12, 8]);
+  ctx.shadowColor = warning.color; ctx.shadowBlur = secondary ? 4 + charge * 7 : 8 + charge * 13;
+  ctx.lineWidth = warning.detonated ? 9 : secondary ? 2.25 : 4; ctx.setLineDash(warning.detonated ? [] : secondary ? [7, 10] : [12, 8]);
   traceBossDangerShape(warning); ctx.stroke(); ctx.setLineDash([]);
   if (!warning.detonated) {
-    ctx.strokeStyle = colorAlpha("#ffffff", .65 + charge * .25); ctx.lineWidth = 2;
-    traceBossDangerShape(warning, .82 - charge * .68); ctx.stroke();
-    for (let i = 0; i < 12; i += 1) {
-      const angle = i / 12 * Math.PI * 2 + ambienceTime * .35;
+    ctx.strokeStyle = colorAlpha("#ffffff", secondary ? .28 + charge * .22 : .55 + charge * .28); ctx.lineWidth = secondary ? 1.25 : 2;
+    traceBossDangerShape(warning, secondary ? .7 : .82 - charge * .68); ctx.stroke();
+    const markerCount = secondary ? 4 : 8;
+    for (let i = 0; i < markerCount; i += 1) {
+      const angle = i / markerCount * Math.PI * 2 + ambienceTime * (secondary ? .12 : .35);
       ctx.save(); ctx.rotate(angle); ctx.translate(warning.radius + 7, 0);
-      ctx.fillStyle = colorAlpha(warning.color, .72 + charge * .25);
-      ctx.beginPath(); ctx.moveTo(-7, -5); ctx.lineTo(3, 0); ctx.lineTo(-7, 5); ctx.closePath(); ctx.fill(); ctx.restore();
+      ctx.fillStyle = colorAlpha(warning.color, secondary ? .48 + charge * .28 : .72 + charge * .25);
+      const markerSize = secondary ? 4 : 7;
+      ctx.beginPath(); ctx.moveTo(-markerSize, -markerSize * .7); ctx.lineTo(markerSize * .45, 0); ctx.lineTo(-markerSize, markerSize * .7); ctx.closePath(); ctx.fill(); ctx.restore();
     }
-    ctx.shadowBlur = 0; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(7,8,12,.82)"; traceBossDangerShape(warning, 33 / warning.radius); ctx.fill();
-    ctx.strokeStyle = colorAlpha(warning.color, .88); ctx.lineWidth = 2; traceBossDangerShape(warning, 33 / warning.radius); ctx.stroke();
-    ctx.fillStyle = "#ffffff"; ctx.font = "900 18px system-ui"; ctx.fillText(Math.max(0, warning.delay).toFixed(1), 0, -7);
-    ctx.fillStyle = warning.color; ctx.font = "900 10px system-ui"; ctx.fillText(warning.impactName, 0, 11);
-    ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.font = "800 10px system-ui";
-    ctx.fillText(`命中 -${warning.damage} · 重创减速`, 0, warning.radius * .58);
+    // The old full damage card sat directly over the controlled character.
+    // Damage remains in the boss action banner; the ground now preserves a
+    // transparent visual window for animation and foot placement.
+    warning.clearCoreRendered = true;
+    warning.coreTextRendered = false;
   }
   ctx.restore();
 }
 
 function drawBossWarningOverlay(warning) {
   const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
-  const dangerAlpha = warning.detonated ? Math.min(1, warning.life * 2.1) : .72 + charge * .28;
+  const secondary = warning.warningRole === "secondary";
+  const dangerAlpha = warning.detonated ? Math.min(1, warning.life * 2.1) : secondary ? .48 + charge * .24 : .72 + charge * .28;
   const countdownRadius = warning.radius * Math.max(.18, 1 - charge * .78);
   ctx.save();
   ctx.translate(warning.x, warning.y);
@@ -7404,38 +7411,52 @@ function drawBossWarningOverlay(warning) {
   // A dark keyline keeps the danger edge readable on snow, hospital floors,
   // bright ultimates and the max-power tutorial alike.
   ctx.strokeStyle = "rgba(8,5,9,.86)";
-  ctx.lineWidth = warning.detonated ? 12 : 9;
+  ctx.lineWidth = warning.detonated ? 12 : secondary ? 5.5 : 9;
   traceBossDangerShape(warning); ctx.stroke();
   ctx.strokeStyle = warning.detonated ? "#ffffff" : warning.color;
-  ctx.lineWidth = warning.detonated ? 6 : 4;
-  ctx.setLineDash(warning.detonated ? [] : [18, 8]);
-  ctx.lineDashOffset = -ambienceTime * (18 + charge * 42);
+  ctx.lineWidth = warning.detonated ? 6 : secondary ? 2.25 : 4;
+  ctx.setLineDash(warning.detonated ? [] : secondary ? [7, 11] : [18, 8]);
+  ctx.lineDashOffset = -ambienceTime * (secondary ? 13 + charge * 24 : 18 + charge * 42);
   traceBossDangerShape(warning); ctx.stroke();
   ctx.setLineDash([]);
 
   if (!warning.detonated) {
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(255,255,255,.92)";
-    ctx.lineWidth = 2.5;
-    traceBossDangerShape(warning, countdownRadius / warning.radius); ctx.stroke();
-    for (let index = 0; index < 8; index += 1) {
-      const angle = index / 8 * Math.PI * 2 + ambienceTime * .55;
-      ctx.save();
-      ctx.rotate(angle);
-      ctx.translate(warning.radius + 9, 0);
-      ctx.fillStyle = index % 2 ? "#ffffff" : warning.color;
-      ctx.beginPath(); ctx.moveTo(-10, -5); ctx.lineTo(2, 0); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
-      ctx.restore();
+    if (!secondary) {
+      ctx.strokeStyle = "rgba(255,255,255,.92)";
+      ctx.lineWidth = 2.5;
+      traceBossDangerShape(warning, countdownRadius / warning.radius); ctx.stroke();
+      for (let index = 0; index < 8; index += 1) {
+        const angle = index / 8 * Math.PI * 2 + ambienceTime * .55;
+        ctx.save(); ctx.rotate(angle); ctx.translate(warning.radius + 9, 0);
+        ctx.fillStyle = index % 2 ? "#ffffff" : warning.color;
+        ctx.beginPath(); ctx.moveTo(-10, -5); ctx.lineTo(2, 0); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill(); ctx.restore();
+      }
+      const label = `主落点  ${Math.max(0, warning.delay).toFixed(1)}s`;
+      ctx.font = "950 12px system-ui";
+      const labelWidth = Math.max(94, ctx.measureText(label).width + 22);
+      ctx.fillStyle = "rgba(8,5,9,.9)";
+      ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.fill();
+      ctx.strokeStyle = warning.color; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, 0, -warning.radius - 22.5);
+      warning.primaryLabelRendered = true;
+      warning.overlayWeight = 1;
+    } else {
+      const marker = warning.strikeIndex === 1 ? "Ⅱ" : "Ⅲ";
+      const side = warning.strikeIndex === 1 ? 1 : -1;
+      const markerX = side * warning.radius * .58;
+      const markerY = -warning.radius * .62;
+      ctx.fillStyle = "rgba(8,5,9,.82)";
+      ctx.beginPath(); ctx.roundRect(markerX - 17, markerY - 11, 34, 22, 7); ctx.fill();
+      ctx.strokeStyle = colorAlpha(warning.color, .86); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(markerX - 17, markerY - 11, 34, 22, 7); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.font = "900 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(marker, markerX, markerY + .5);
+      warning.secondaryCueRendered = true;
+      warning.overlayWeight = .42;
     }
-    const label = `危险  ${Math.max(0, warning.delay).toFixed(1)}s`;
-    ctx.font = "950 12px system-ui";
-    const labelWidth = Math.max(86, ctx.measureText(label).width + 22);
-    ctx.fillStyle = "rgba(8,5,9,.9)";
-    ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.fill();
-    ctx.strokeStyle = warning.color; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.roundRect(-labelWidth / 2, -warning.radius - 35, labelWidth, 25, 9); ctx.stroke();
-    ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(label, 0, -warning.radius - 22.5);
   }
   warning.overlayRendered = true;
   ctx.restore();
@@ -11731,6 +11752,14 @@ if (QA_MODE) {
         bridgeMotifs: [...new Set(game.bossWarnings.map((warning) => warning.bridgeMotif).filter(Boolean))],
         impactBridges: game.bossAttackBridges.length,
         impactConnected: game.bossAttackBridges.some((bridge) => bridge.impactConnected && bridge.bridgeRendered),
+        hierarchy: {
+          primary: game.bossWarnings.filter((warning) => warning.warningRole !== "secondary" && warning.primaryLabelRendered).length,
+          secondary: game.bossWarnings.filter((warning) => warning.warningRole === "secondary").length,
+          compactSecondary: game.bossWarnings.filter((warning) => warning.secondaryCueRendered).length,
+          clearCores: game.bossWarnings.filter((warning) => warning.clearCoreRendered).length,
+          interiorLabels: game.bossWarnings.filter((warning) => warning.coreTextRendered).length,
+          totalWeight: Number(game.bossWarnings.reduce((sum, warning) => sum + (warning.overlayWeight || 0), 0).toFixed(2)),
+        },
         telegraphs: [...new Set(game.bossWarnings.map((warning) => warning.telegraph).filter(Boolean))],
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
       },
