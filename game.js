@@ -3895,7 +3895,7 @@ function createTerrainDeformation(x, y, radius, options = {}) {
   if (game.bossScars.length > scarLimit) game.bossScars.splice(0, game.bossScars.length - scarLimit);
   if (source !== "weapon") {
     const color = options.color || spec.color;
-    const rings = intensity > 1.05 ? 4 : 3;
+    const rings = options.ringCount ?? (intensity > 1.05 ? 4 : 3);
     for (let ring = 0; ring < rings; ring += 1) {
       game.shockwaves.push({
         x,
@@ -3909,7 +3909,10 @@ function createTerrainDeformation(x, y, radius, options = {}) {
         ellipse: .62 + ring * .07,
       });
     }
-    if (options.cinematic !== false) triggerCinematicImpact(x, y, color, intensity, .68 + intensity * .16);
+    if (options.cinematic !== false) {
+      const cinematicIntensity = options.cinematicIntensity ?? intensity;
+      triggerCinematicImpact(x, y, color, cinematicIntensity, .62 + cinematicIntensity * .15);
+    }
   }
 }
 
@@ -4200,13 +4203,17 @@ function updateEnemyProjectiles(dt) {
 }
 
 function createBossScar(warning) {
+  const primary = warning.warningRole !== "secondary";
   createTerrainDeformation(warning.x, warning.y, warning.radius, {
     type: warning.scarType,
     sceneId: warning.sceneId,
     color: warning.color,
     source: "boss",
-    intensity: 1.2,
+    intensity: primary ? 1.24 : .78,
     life: 78,
+    ringCount: primary ? 2 : 1,
+    cinematic: primary,
+    cinematicIntensity: .62,
   });
 }
 
@@ -4215,27 +4222,39 @@ function updateBossWarnings(dt) {
     if (!warning.detonated) {
       warning.delay -= dt;
       if (warning.delay > 0) continue;
+      const primary = warning.warningRole !== "secondary";
       warning.detonated = true;
-      warning.life = .68;
+      warning.life = preferences.reduceMotion ? .34 : primary ? .58 : .46;
+      warning.maxLife = warning.life;
+      warning.impactFxRole = primary ? "primary" : "secondary";
+      warning.impactWeight = primary ? .78 : .2;
       createBossScar(warning);
       const source = game.enemies.find((enemy) => enemy.id === warning.sourceId && !enemy.dead);
       game.bossAttackBridges.push({
         ...warning,
         sourceX: source?.x ?? warning.sourceX,
         sourceY: source?.y ?? warning.sourceY,
-        life: preferences.reduceMotion ? .42 : .92,
-        maxLife: preferences.reduceMotion ? .42 : .92,
+        life: preferences.reduceMotion ? .3 : primary ? .72 : .48,
+        maxLife: preferences.reduceMotion ? .3 : primary ? .72 : .48,
         impactConnected: true,
         afterimage: true,
       });
       if (game.bossAttackBridges.length > 6) game.bossAttackBridges.splice(0, game.bossAttackBridges.length - 6);
-      makeDirectionalParticles(warning.x, warning.y, warning.color, 56, 340, -Math.PI / 2, Math.PI, warning.particleShape);
+      const particleStart = game.particles.length;
+      makeDirectionalParticles(warning.x, warning.y, warning.color, primary ? 30 : 9, primary ? 300 : 205, -Math.PI / 2, primary ? Math.PI : Math.PI * .66, warning.particleShape);
+      for (let index = particleStart; index < game.particles.length; index += 1) game.particles[index].bossImpact = true;
       if (isPointInsideBossWarning({ ...warning, radius: warning.radius + 13 }, game.player.x, game.player.y)) damagePlayer(warning.damage, warning.x, warning.y, true);
-      game.shake = Math.max(game.shake, 19);
-      game.bossShock = .78;
-      game.flash = Math.max(game.flash, .32);
-      vibrateFeedback([55, 25, 95]);
-      tone(62, .2, "sawtooth", .06, .38);
+      if (primary) {
+        game.shake = Math.max(game.shake, preferences.reduceMotion ? 0 : 17);
+        game.bossShock = Math.max(game.bossShock, preferences.reduceMotion ? .1 : .56);
+        game.flash = Math.max(game.flash, preferences.reduceMotion ? .06 : .2);
+        vibrateFeedback([48, 24, 82]);
+        tone(62, .2, "sawtooth", .055, .38);
+      } else {
+        game.shake = Math.max(game.shake, preferences.reduceMotion ? 0 : 8);
+        game.bossShock = Math.max(game.bossShock, preferences.reduceMotion ? .06 : .22);
+        game.flash = Math.max(game.flash, preferences.reduceMotion ? .025 : .07);
+      }
     } else warning.life -= dt;
   }
   game.bossWarnings = game.bossWarnings.filter((warning) => !warning.detonated || warning.life > 0);
@@ -6882,6 +6901,14 @@ function drawBattlefield() {
   for (const kit of game.medkits) if (isWorldPointVisible(kit.x, kit.y, 28)) drawMedkit(kit);
   drawDivineDelivery();
   for (const warning of game.bossWarnings) if (isWorldPointVisible(warning.x, warning.y, warning.radius + 24)) drawBossWarning(warning);
+  // Boss debris belongs to the terrain impact layer. Rendering it before the
+  // actor stack preserves the force of the explosion without erasing the
+  // controlled character at the exact moment the player needs to recover.
+  const particleStep = game.performance?.quality < .65 ? 2 : 1;
+  for (let index = 0; index < game.particles.length; index += particleStep) {
+    const particle = game.particles[index];
+    if (particle.bossImpact && isWorldPointVisible(particle.x, particle.y, 28)) drawCombatParticle(particle);
+  }
   // Player and enemies share one Canvas2D actor layer. Sorting by their
   // ground-contact point makes feet, shadows and bodies occlude naturally.
   const petPosition = game.player.companionPet ? getCompanionPetPosition() : null;
@@ -6920,10 +6947,9 @@ function drawBattlefield() {
   if (game.rangerFinisher && isWorldPointVisible(game.rangerFinisher.x, game.rangerFinisher.y, 120)) drawRangerFinisher(game.rangerFinisher);
   for (const lightning of game.lightnings) if (isWorldPointVisible(lightning.x, lightning.y, 80)) drawLightning(lightning);
   drawUltimateEffect();
-  const particleStep = game.performance?.quality < .65 ? 2 : 1;
   for (let index = 0; index < game.particles.length; index += particleStep) {
     const particle = game.particles[index];
-    if (isWorldPointVisible(particle.x, particle.y, 28)) drawCombatParticle(particle);
+    if (!particle.bossImpact && isWorldPointVisible(particle.x, particle.y, 28)) drawCombatParticle(particle);
   }
   // Boss danger information is deliberately rendered after combat VFX. The
   // ground wash still sits below actors, while this final outline cannot be
@@ -7289,7 +7315,8 @@ function drawBossAttackBridge(warning, layer = "ground") {
   const profile = getBossAttackBridgeProfile(warning.sceneId);
   const motif = warning.bridgeMotif || profile.motif;
   const charge = warning.afterimage ? 1 : Math.max(.06, 1 - warning.delay / Math.max(.01, warning.maxDelay));
-  const fade = warning.afterimage ? Math.max(0, warning.life / Math.max(.01, warning.maxLife)) : .52 + charge * .48;
+  const hierarchyFade = warning.afterimage && warning.warningRole === "secondary" ? .4 : 1;
+  const fade = (warning.afterimage ? Math.max(0, warning.life / Math.max(.01, warning.maxLife)) : .52 + charge * .48) * hierarchyFade;
   const bridge = getBossBridgePoints(warning);
   const { points, sourceX, sourceY, dx, dy, distance } = bridge;
   const progress = warning.afterimage ? 1 : .12 + charge * .88;
@@ -7357,7 +7384,129 @@ function drawBossAttackBridge(warning, layer = "ground") {
   ctx.restore();
 }
 
+function drawBossImpactGround(warning) {
+  const primary = warning.warningRole !== "secondary";
+  const maxLife = Math.max(.01, warning.maxLife || .58);
+  const life = Math.max(0, warning.life / maxLife);
+  const progress = 1 - life;
+  const eased = 1 - Math.pow(1 - progress, 2.4);
+  const r = warning.radius;
+  const motif = warning.telegraph || getBossImpactSpec(warning.sceneId).telegraph;
+  const markCount = primary ? (LOW_POWER_DEVICE ? 4 : 6) : 2;
+  ctx.save();
+  ctx.translate(warning.x, warning.y);
+  ctx.globalAlpha = Math.min(1, life * 1.7) * (primary ? .92 : .52);
+  ctx.globalCompositeOperation = allowExpensiveGlow() ? "lighter" : "source-over";
+  ctx.strokeStyle = colorAlpha(warning.color, primary ? .88 : .58);
+  ctx.fillStyle = colorAlpha(warning.color, primary ? .22 : .12);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  if (primary) {
+    ctx.lineWidth = 2.4 + life * 2.2;
+    traceBossDangerShape(warning, .2 + eased * .78);
+    ctx.stroke();
+    ctx.strokeStyle = colorAlpha("#ffffff", .2 + life * .32);
+    ctx.lineWidth = 1.1 + life;
+    traceBossDangerShape(warning, .14 + eased * .5);
+    ctx.stroke();
+  } else {
+    ctx.lineWidth = 2;
+    for (let segment = 0; segment < 3; segment += 1) {
+      const angle = warning.strikeIndex * 1.7 + segment * Math.PI * .66;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * (.42 + eased * .35), angle, angle + .42);
+      ctx.stroke();
+    }
+  }
+
+  if (motif === "collapseGrid") {
+    for (let index = 0; index < markCount; index += 1) {
+      const angle = index / markCount * Math.PI * 2 + .22;
+      ctx.save(); ctx.rotate(angle);
+      ctx.lineWidth = primary ? 4 : 2;
+      ctx.beginPath(); ctx.moveTo(r * .22, 0); ctx.lineTo(r * .43, -r * .06); ctx.lineTo(r * (.68 + eased * .2), r * .025); ctx.stroke();
+      ctx.restore();
+    }
+  } else if (motif === "frostFracture") {
+    for (let index = 0; index < markCount; index += 1) {
+      const angle = index / markCount * Math.PI * 2 + .12;
+      ctx.save(); ctx.rotate(angle); ctx.translate(r * (.4 + eased * .27), 0);
+      ctx.beginPath(); ctx.moveTo(r * .15, 0); ctx.lineTo(-r * .08, -r * .055); ctx.lineTo(-r * .025, 0); ctx.lineTo(-r * .08, r * .055); ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+  } else if (motif === "bioSeal") {
+    ctx.lineWidth = primary ? 5 : 2.2;
+    for (let index = 0; index < markCount; index += 1) {
+      const angle = index / markCount * Math.PI * 2 + progress * .35;
+      const x = Math.cos(angle) * r * (.5 + eased * .18);
+      const y = Math.sin(angle) * r * (.5 + eased * .18);
+      ctx.beginPath(); ctx.arc(x, y, primary ? 7 : 4, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else if (motif === "bulkheadBreach") {
+    ctx.lineWidth = primary ? 5 : 2.2;
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(side * r * .22, -r * .13); ctx.lineTo(side * r * (.74 + eased * .16), -r * .13); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(side * r * .22, r * .13); ctx.lineTo(side * r * (.74 + eased * .16), r * .13); ctx.stroke();
+    }
+  } else if (motif === "magmaFault") {
+    for (let index = 0; index < markCount; index += 1) {
+      const angle = index / markCount * Math.PI * 2 + .1;
+      ctx.save(); ctx.rotate(angle); ctx.lineWidth = primary ? 5 : 2.3;
+      ctx.beginPath(); ctx.moveTo(r * .2, 0); ctx.lineTo(r * .41, r * .055); ctx.lineTo(r * .58, -r * .035); ctx.lineTo(r * (.72 + eased * .18), r * .02); ctx.stroke(); ctx.restore();
+    }
+  } else if (motif === "lunarTarget") {
+    ctx.lineWidth = primary ? 3.5 : 1.8;
+    const orbitCount = primary ? 3 : 1;
+    for (let orbit = 0; orbit < orbitCount; orbit += 1) {
+      ctx.beginPath(); ctx.ellipse(0, 0, r * (.42 + orbit * .15 + eased * .1), r * (.16 + orbit * .055), progress * .35 + orbit * .7, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else {
+    ctx.lineWidth = primary ? 5.5 : 2.3;
+    for (let slash = 0; slash < markCount; slash += 1) {
+      const offset = (slash - (markCount - 1) / 2) * r * .17;
+      ctx.beginPath(); ctx.moveTo(-r * .72, offset + r * .16); ctx.quadraticCurveTo(0, offset - r * .22, r * (.58 + eased * .22), offset - r * .08); ctx.stroke();
+    }
+  }
+  warning.impactClearCoreRendered = true;
+  if (primary) warning.impactCrownRendered = true;
+  else warning.impactSeamRendered = true;
+  ctx.restore();
+}
+
+function drawBossImpactOverlay(warning) {
+  const primary = warning.warningRole !== "secondary";
+  const maxLife = Math.max(.01, warning.maxLife || .58);
+  const life = Math.max(0, warning.life / maxLife);
+  const progress = 1 - life;
+  const r = warning.radius;
+  ctx.save();
+  ctx.translate(warning.x, warning.y);
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = Math.min(1, life * 1.8) * (primary ? .82 : .42);
+  ctx.strokeStyle = primary ? colorAlpha("#ffffff", .8) : colorAlpha(warning.color, .74);
+  ctx.lineWidth = primary ? 2.6 : 1.7;
+  ctx.lineCap = "round";
+  const tickCount = primary ? (LOW_POWER_DEVICE ? 6 : 10) : 2;
+  for (let index = 0; index < tickCount; index += 1) {
+    const angle = (primary ? index / tickCount * Math.PI * 2 : warning.strikeIndex * 1.9 + index * Math.PI) + progress * .18;
+    const start = r * (primary ? .58 : .64);
+    const length = r * (primary ? .12 + progress * .14 : .09);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * start, Math.sin(angle) * start);
+    ctx.lineTo(Math.cos(angle) * (start + length), Math.sin(angle) * (start + length));
+    ctx.stroke();
+  }
+  warning.impactOverlayRendered = true;
+  warning.fullImpactOutlineRendered = false;
+  warning.impactOverlayWeight = primary ? .7 : .18;
+  ctx.restore();
+}
+
 function drawBossWarning(warning) {
+  if (warning.detonated) {
+    drawBossImpactGround(warning);
+    return;
+  }
   const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
   const pulse = .55 + Math.sin(ambienceTime * 24) * .22;
   const secondary = warning.warningRole === "secondary";
@@ -7395,6 +7544,11 @@ function drawBossWarning(warning) {
 }
 
 function drawBossWarningOverlay(warning) {
+  if (warning.detonated) {
+    drawBossImpactOverlay(warning);
+    warning.overlayRendered = true;
+    return;
+  }
   const charge = warning.detonated ? 1 : Math.max(0, 1 - warning.delay / warning.maxDelay);
   const secondary = warning.warningRole === "secondary";
   const dangerAlpha = warning.detonated ? Math.min(1, warning.life * 2.1) : secondary ? .48 + charge * .24 : .72 + charge * .28;
@@ -11759,6 +11913,17 @@ if (QA_MODE) {
           clearCores: game.bossWarnings.filter((warning) => warning.clearCoreRendered).length,
           interiorLabels: game.bossWarnings.filter((warning) => warning.coreTextRendered).length,
           totalWeight: Number(game.bossWarnings.reduce((sum, warning) => sum + (warning.overlayWeight || 0), 0).toFixed(2)),
+        },
+        impactHierarchy: {
+          primaryCrowns: game.bossWarnings.filter((warning) => warning.impactCrownRendered).length,
+          secondarySeams: game.bossWarnings.filter((warning) => warning.impactSeamRendered).length,
+          clearCores: game.bossWarnings.filter((warning) => warning.impactClearCoreRendered).length,
+          fullWhiteOutlines: game.bossWarnings.filter((warning) => warning.fullImpactOutlineRendered).length,
+          groundWeight: Number(game.bossWarnings.reduce((sum, warning) => sum + (warning.impactWeight || 0), 0).toFixed(2)),
+          overlayWeight: Number(game.bossWarnings.reduce((sum, warning) => sum + (warning.impactOverlayWeight || 0), 0).toFixed(2)),
+          particles: game.particles.length,
+          particlesBehindActors: game.particles.filter((particle) => particle.bossImpact).length,
+          shockwaves: game.shockwaves.length,
         },
         telegraphs: [...new Set(game.bossWarnings.map((warning) => warning.telegraph).filter(Boolean))],
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
