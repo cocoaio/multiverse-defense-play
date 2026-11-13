@@ -714,6 +714,24 @@ const bossSignatureProfiles = {
   cultivation: { type: "swordHalo", action: "宗主剑轮", color: "#d8ffe0", motion: "swordCommand" },
 };
 
+// A boss special must read as one physical action: the held weapon or limb
+// commits first, its force travels across the battlefield, and the same
+// material remains embedded in the damaged terrain. These profiles deliberately
+// change geometry, not just hue, so every world keeps its own attack language.
+const bossAttackBridgeProfiles = {
+  city: { motif: "clawGouge", color: "#ff7355", accent: "#ffd2a1" },
+  snow: { motif: "glacierRidge", color: "#a8efff", accent: "#f4fdff" },
+  hospital: { motif: "viralArtery", color: "#5ff0b8", accent: "#ff7190" },
+  orbit: { motif: "carrierRail", color: "#78e9ff", accent: "#f2f7ff" },
+  mars: { motif: "magmaFault", color: "#ff733e", accent: "#ffd173" },
+  moon: { motif: "gravityTether", color: "#b8adff", accent: "#f5f2ff" },
+  cultivation: { motif: "inkSwordPath", color: "#e7d28c", accent: "#dffff0" },
+};
+
+function getBossAttackBridgeProfile(sceneId = game?.scene?.id || "city") {
+  return bossAttackBridgeProfiles[sceneId] || bossAttackBridgeProfiles.city;
+}
+
 const bossDefeatProfiles = {
   city: { title: "暴君失衡", detail: "血肉装甲崩裂，街区威胁解除", mode: "collapse", color: "#ff6a55" },
   snow: { title: "冰核破碎", detail: "巨兽冻结成晶，随后崩解为霜尘", mode: "shatter", color: "#d8fbff" },
@@ -2087,6 +2105,7 @@ function makeGame(runType = "main") {
     enemies: [],
     enemyProjectiles: [],
     bossWarnings: [],
+    bossAttackBridges: [],
     bossScars: [],
     corpses: [],
     bullets: [],
@@ -3953,8 +3972,13 @@ function resolveEnemyAttack(enemy) {
 }
 
 function queueBossStrike(enemy, x, y, radius, delay, damage, impact, phase) {
+  const direction = Math.atan2(y - enemy.y, x - enemy.x);
+  const profile = getBossAttackBridgeProfile(game.scene.id);
   game.bossWarnings.push({
     x, y, radius, delay, maxDelay: delay, life: 0, sourceId: enemy.id, damage,
+    sourceX: enemy.x + Math.cos(direction) * enemy.size * .42,
+    sourceY: enemy.y + Math.sin(direction) * enemy.size * .34,
+    bridgeMotif: profile.motif,
     color: impact.color, impactName: impact.name, scarType: impact.scar,
     particleShape: impact.particle, telegraph: impact.telegraph, sceneId: game.scene.id, bossPhase: phase, detonated: false,
   });
@@ -3983,7 +4007,8 @@ function activateBossPhase(enemy, phase) {
   for (const [index, type] of reinforcements.entries()) {
     if (game.enemies.length >= PERFORMANCE_PROFILE.enemyCap) break;
     const angle = index / reinforcements.length * Math.PI * 2 + enemy.sway;
-    spawnEnemy(type, enemy.x + Math.cos(angle) * 96, enemy.y + Math.sin(angle) * 72);
+    const distance = 154 + index * 12;
+    spawnEnemy(type, enemy.x + Math.cos(angle) * distance, enemy.y + Math.sin(angle) * distance * .72);
   }
   tone(phase === 2 ? 92 : 67, .42, "sawtooth", .055, .58);
 }
@@ -4041,7 +4066,10 @@ function updateEnemies(dt) {
       queueBossStrike(enemy, targetX, targetY, radius, delay, damage, impact, phase);
       if (phase >= 2) queueBossStrike(enemy, targetX + sideX * radius * .94, targetY + sideY * radius * .94, radius * .82, delay + .12, damage, impact, phase);
       if (phase >= 3) queueBossStrike(enemy, targetX - sideX * radius * .94, targetY - sideY * radius * .94, radius * .82, delay + .24, damage, impact, phase);
-      if (enemy.bossSkillIndex % 2 === 0) spawnEnemy(Math.random() < .5 ? "ranged" : "caster", enemy.x + rand(-42, 42), enemy.y + rand(-30, 22));
+      if (enemy.bossSkillIndex % 2 === 0) {
+        const summonAngle = attackAngle + Math.PI + (enemy.bossSkillIndex % 4 - 1.5) * .42;
+        spawnEnemy(Math.random() < .5 ? "ranged" : "caster", enemy.x + Math.cos(summonAngle) * 152, enemy.y + Math.sin(summonAngle) * 112);
+      }
       const bossName = game.scene.endless ? cultivationDomains[game.world.domainIndex].boss : game.scene.boss;
       game.banner = { text: `${bossName} · ${getBossSignature().action}`, sub: `${getBossPhaseName(phase)} · ${phase} 重${impact.name}落点 · 命中损失 ${damage} 生命`, time: 1.45 };
     }
@@ -4187,6 +4215,17 @@ function updateBossWarnings(dt) {
       warning.detonated = true;
       warning.life = .68;
       createBossScar(warning);
+      const source = game.enemies.find((enemy) => enemy.id === warning.sourceId && !enemy.dead);
+      game.bossAttackBridges.push({
+        ...warning,
+        sourceX: source?.x ?? warning.sourceX,
+        sourceY: source?.y ?? warning.sourceY,
+        life: preferences.reduceMotion ? .42 : .92,
+        maxLife: preferences.reduceMotion ? .42 : .92,
+        impactConnected: true,
+        afterimage: true,
+      });
+      if (game.bossAttackBridges.length > 6) game.bossAttackBridges.splice(0, game.bossAttackBridges.length - 6);
       makeDirectionalParticles(warning.x, warning.y, warning.color, 56, 340, -Math.PI / 2, Math.PI, warning.particleShape);
       if (isPointInsideBossWarning({ ...warning, radius: warning.radius + 13 }, game.player.x, game.player.y)) damagePlayer(warning.damage, warning.x, warning.y, true);
       game.shake = Math.max(game.shake, 19);
@@ -4364,6 +4403,7 @@ function beginBossVictorySequence(enemy) {
   game.enemies.length = 0;
   game.enemyProjectiles.length = 0;
   game.bossWarnings.length = 0;
+  game.bossAttackBridges.length = 0;
   game.bullets.length = 0;
   game.missionCompleteQueued = true;
   game.boss = null;
@@ -4983,6 +5023,7 @@ function updateEffects(dt) {
   }
   for (const mark of game.groundMarks) mark.life -= dt;
   for (const scar of game.bossScars) { scar.life -= dt; scar.age = (scar.age || 0) + dt; }
+  for (const bridge of game.bossAttackBridges) bridge.life -= dt;
   if (game.cinematicImpact) {
     game.cinematicImpact.time -= dt;
     if (game.cinematicImpact.time <= 0) game.cinematicImpact = null;
@@ -4995,6 +5036,7 @@ function updateEffects(dt) {
   game.impactBursts = game.impactBursts.filter((burst) => burst.life > 0);
   game.groundMarks = game.groundMarks.filter((mark) => mark.life > 0);
   game.bossScars = game.bossScars.filter((scar) => scar.life > 0);
+  game.bossAttackBridges = game.bossAttackBridges.filter((bridge) => bridge.life > 0);
   if (game.particles.length > EFFECT_LIMITS.particles) game.particles.splice(0, game.particles.length - EFFECT_LIMITS.particles);
   if (game.impactBursts.length > EFFECT_LIMITS.bursts) game.impactBursts.splice(0, game.impactBursts.length - EFFECT_LIMITS.bursts);
   if (game.shockwaves.length > EFFECT_LIMITS.shockwaves) game.shockwaves.splice(0, game.shockwaves.length - EFFECT_LIMITS.shockwaves);
@@ -6814,6 +6856,8 @@ function drawBattlefield() {
   drawOpeningIncursionMarkers();
   for (const scar of game.bossScars) if (isWorldPointVisible(scar.x, scar.y, scar.radius + 30)) drawBossScar(scar);
   drawBossCinematicGround();
+  for (const bridge of game.bossAttackBridges) drawBossAttackBridge(bridge, "ground");
+  for (const warning of game.bossWarnings) if (!warning.detonated) drawBossAttackBridge(warning, "ground");
   for (const wave of game.shockwaves) {
     if (!isWorldPointVisible(wave.x, wave.y, wave.radius + 24)) continue;
     ctx.save();
@@ -6865,6 +6909,7 @@ function drawBattlefield() {
     else if (actor.companion) drawCompanionPet();
     else drawEnemy(actor);
   }
+  for (const warning of game.bossWarnings) if (!warning.detonated) drawBossAttackBridge(warning, "origin");
   if (game.bossDemise) drawBossDemise(game.bossDemise);
   for (const projectile of game.enemyProjectiles) if (isWorldPointVisible(projectile.x, projectile.y, 36)) drawEnemyProjectile(projectile);
   for (const bullet of game.bullets) if (isWorldPointVisible(bullet.x, bullet.y, 48)) drawBullet(bullet);
@@ -7182,6 +7227,129 @@ function drawBossDangerMotif(warning, charge) {
     ctx.font = `900 ${Math.round(r * .25)}px serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = colorAlpha("#fff0b0", .65 + charge * .25); ctx.fillText("镇", 0, 1);
   }
   warning.motifRendered = true;
+  ctx.restore();
+}
+
+function traceBossBridgePoints(points, progress, lateral = 0) {
+  const last = points.length - 1;
+  const position = Math.max(.02, Math.min(1, progress)) * last;
+  const complete = Math.floor(position);
+  ctx.beginPath();
+  for (let index = 0; index <= Math.min(last, complete + 1); index += 1) {
+    let point = points[index];
+    if (index === complete + 1 && position < last) {
+      const previous = points[complete];
+      const mix = position - complete;
+      point = { x: previous.x + (point.x - previous.x) * mix, y: previous.y + (point.y - previous.y) * mix };
+    }
+    const previous = points[Math.max(0, index - 1)];
+    const next = points[Math.min(last, index + 1)];
+    const length = Math.max(1, Math.hypot(next.x - previous.x, next.y - previous.y));
+    const x = point.x - (next.y - previous.y) / length * lateral;
+    const y = point.y + (next.x - previous.x) / length * lateral;
+    if (!index) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+}
+
+function getBossBridgePoints(warning) {
+  const source = game.enemies.find((enemy) => enemy.id === warning.sourceId && !enemy.dead);
+  const dx = warning.x - (source?.x ?? warning.sourceX);
+  const dy = warning.y - (source?.y ?? warning.sourceY);
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const sourceReach = source ? source.size * .46 : 0;
+  const startX = (source?.x ?? warning.sourceX) + dx / distance * sourceReach;
+  const startY = (source?.y ?? warning.sourceY) + dy / distance * sourceReach * .72;
+  const segments = LOW_POWER_DEVICE ? 4 : 7;
+  const motif = warning.bridgeMotif || getBossAttackBridgeProfile(warning.sceneId).motif;
+  const amplitude = Math.min(44, distance * .14);
+  const points = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const t = index / segments;
+    const envelope = Math.sin(t * Math.PI);
+    let bend = 0;
+    if (motif === "clawGouge") bend = Math.sin(index * 2.73 + warning.sourceId) * amplitude * .46 * envelope;
+    else if (motif === "glacierRidge") bend = (index % 2 ? 1 : -1) * amplitude * .36 * envelope;
+    else if (motif === "viralArtery") bend = Math.sin(t * Math.PI * 3 + warning.sourceId) * amplitude * .52 * envelope;
+    else if (motif === "magmaFault") bend = Math.sin(index * 4.17 + warning.sourceId) * amplitude * .62 * envelope;
+    else if (motif === "gravityTether") bend = Math.sin(t * Math.PI * 2) * amplitude * .28 * envelope;
+    else if (motif === "inkSwordPath") bend = Math.sin(t * Math.PI) * amplitude * .22;
+    points.push({
+      x: startX + dx * t - dy / distance * bend,
+      y: startY + dy * t + dx / distance * bend,
+    });
+  }
+  return { points, sourceX: startX, sourceY: startY, dx, dy, distance };
+}
+
+function drawBossAttackBridge(warning, layer = "ground") {
+  const profile = getBossAttackBridgeProfile(warning.sceneId);
+  const motif = warning.bridgeMotif || profile.motif;
+  const charge = warning.afterimage ? 1 : Math.max(.06, 1 - warning.delay / Math.max(.01, warning.maxDelay));
+  const fade = warning.afterimage ? Math.max(0, warning.life / Math.max(.01, warning.maxLife)) : .52 + charge * .48;
+  const bridge = getBossBridgePoints(warning);
+  const { points, sourceX, sourceY, dx, dy, distance } = bridge;
+  const progress = warning.afterimage ? 1 : .12 + charge * .88;
+  if (layer === "origin") {
+    if (game.bossWarnings.find((entry) => !entry.detonated && entry.sourceId === warning.sourceId) !== warning) return;
+    ctx.save(); ctx.translate(sourceX, sourceY); ctx.rotate(Math.atan2(dy, dx));
+    ctx.globalAlpha = .58 + charge * .4;
+    ctx.strokeStyle = "rgba(7,5,8,.88)"; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(22 + charge * 12, 0); ctx.stroke();
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(24 + charge * 12, 0); ctx.stroke();
+    if (motif === "carrierRail") { ctx.strokeRect(-18, -8, 38, 16); }
+    else if (motif === "viralArtery") { ctx.beginPath(); ctx.arc(0, 0, 13 + charge * 4, -.8, 4.6); ctx.stroke(); }
+    else if (motif === "inkSwordPath") { ctx.beginPath(); ctx.moveTo(-12, -7); ctx.lineTo(24, 0); ctx.lineTo(-12, 7); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.arc(0, 0, 11 + charge * 5, -.7, .7); ctx.stroke(); }
+    warning.bridgeOriginRendered = true;
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  ctx.lineCap = motif === "carrierRail" ? "butt" : "round";
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = fade * (warning.afterimage ? .6 : .78);
+  const drawStroke = (width, color, lateral = 0, alpha = 1) => {
+    ctx.globalAlpha = fade * alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    traceBossBridgePoints(points, progress, lateral); ctx.stroke();
+  };
+  if (motif === "clawGouge") {
+    for (const lane of (LOW_POWER_DEVICE ? [-1, 1] : [-1, 0, 1])) {
+      drawStroke(10, "rgba(18,7,7,.7)", lane * 13, .5);
+      drawStroke(lane ? 3 : 4.5, lane ? profile.color : profile.accent, lane * 13, warning.afterimage ? .48 : .9);
+    }
+  } else if (motif === "glacierRidge") {
+    drawStroke(13, "rgba(15,56,76,.62)", 0, .48); drawStroke(5, profile.accent, 0, .88);
+    const shardCount = LOW_POWER_DEVICE ? 2 : 4;
+    ctx.fillStyle = colorAlpha(profile.color, fade * .82);
+    for (let index = 1; index <= shardCount; index += 1) {
+      const point = points[Math.min(points.length - 1, Math.round(index / (shardCount + 1) * progress * (points.length - 1)))];
+      ctx.beginPath(); ctx.moveTo(point.x - 8, point.y + 5); ctx.lineTo(point.x, point.y - 14 - index * 2); ctx.lineTo(point.x + 9, point.y + 6); ctx.closePath(); ctx.fill();
+    }
+  } else if (motif === "viralArtery") {
+    for (const lane of [-1, 0, 1]) drawStroke(lane ? 3 : 8, lane ? profile.accent : profile.color, lane * 10, lane ? .48 : .78);
+    ctx.fillStyle = profile.accent;
+    for (let index = 2; index < points.length - 1; index += LOW_POWER_DEVICE ? 3 : 2) { if (index / (points.length - 1) > progress) break; ctx.beginPath(); ctx.arc(points[index].x, points[index].y, 3 + index % 3, 0, Math.PI * 2); ctx.fill(); }
+  } else if (motif === "carrierRail") {
+    drawStroke(16, "rgba(4,11,25,.8)", 0, .58); drawStroke(4, profile.color, -7, .88); drawStroke(4, profile.accent, 7, .92);
+    const nx = -dy / distance, ny = dx / distance;
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 2; ctx.globalAlpha = fade * .75;
+    for (let step = .18; step < progress; step += LOW_POWER_DEVICE ? .28 : .18) { const x = sourceX + dx * step, y = sourceY + dy * step; ctx.beginPath(); ctx.moveTo(x - nx * 15, y - ny * 15); ctx.lineTo(x + nx * 15, y + ny * 15); ctx.stroke(); }
+  } else if (motif === "magmaFault") {
+    drawStroke(18, "rgba(31,8,4,.82)", 0, .62); drawStroke(8, profile.color, 0, .78); drawStroke(2.5, profile.accent, 0, .96);
+  } else if (motif === "gravityTether") {
+    drawStroke(14, "rgba(11,8,29,.74)", 0, .56); drawStroke(3, profile.color, 0, .82);
+    ctx.strokeStyle = profile.accent; ctx.lineWidth = 2; ctx.globalAlpha = fade * .72;
+    for (let step = .2; step < progress; step += LOW_POWER_DEVICE ? .34 : .22) { const x = sourceX + dx * step, y = sourceY + dy * step; ctx.beginPath(); ctx.ellipse(x, y, 17 + step * 10, 6, Math.atan2(dy, dx), 0, Math.PI * 2); ctx.stroke(); }
+  } else {
+    drawStroke(17, "rgba(7,13,9,.74)", 0, .55); drawStroke(7, profile.color, 0, .62); drawStroke(2.5, profile.accent, 0, .98);
+    const point = points[Math.min(points.length - 1, Math.max(1, Math.floor(progress * (points.length - 1))))];
+    ctx.save(); ctx.translate(point.x, point.y); ctx.rotate(Math.atan2(dy, dx)); ctx.fillStyle = profile.accent; ctx.beginPath(); ctx.moveTo(17, 0); ctx.lineTo(-7, -7); ctx.lineTo(-3, 0); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+  warning.bridgeRendered = true;
+  if (warning.afterimage) warning.impactConnected = true;
   ctx.restore();
 }
 
@@ -11558,6 +11726,11 @@ if (QA_MODE) {
         active: game.bossWarnings.length,
         overlayRendered: game.bossWarnings.some((warning) => warning.overlayRendered),
         motifRendered: game.bossWarnings.some((warning) => warning.motifRendered),
+        bridgeRendered: game.bossWarnings.some((warning) => warning.bridgeRendered),
+        bridgeOriginRendered: game.bossWarnings.some((warning) => warning.bridgeOriginRendered),
+        bridgeMotifs: [...new Set(game.bossWarnings.map((warning) => warning.bridgeMotif).filter(Boolean))],
+        impactBridges: game.bossAttackBridges.length,
+        impactConnected: game.bossAttackBridges.some((bridge) => bridge.impactConnected && bridge.bridgeRendered),
         telegraphs: [...new Set(game.bossWarnings.map((warning) => warning.telegraph).filter(Boolean))],
         timeRemaining: Number(Math.max(0, game.bossWarnings[0]?.delay || 0).toFixed(2)),
       },
