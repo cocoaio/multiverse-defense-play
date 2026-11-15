@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "100";
+const ASSET_REVISION = "101";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -5828,6 +5828,9 @@ function renderCommandCenter() {
   setHeroElementSprite(ui.sceneHero, scene.id, selectedRunClass);
   setHeroElementSprite(ui.profilePortrait, scene.id, selectedRunClass);
   document.querySelectorAll("[data-system-portrait]").forEach((portrait) => setSystemCardPortrait(portrait, scene.id, portrait.dataset.systemPortrait));
+  document.querySelectorAll("[data-system-scene-art]").forEach((art) => {
+    art.style.backgroundImage = `url("${getResolvedAssetUrl(`./assets/fallback/${scene.id}-battlefield-v1.jpg`)}")`;
+  });
   ui.lobbyChapter.textContent = `${scene.chapter} · ${scene.name}`;
   ui.lobbyMission.textContent = isSceneUnlocked(selectedSceneIndex) ? `待命：${nextLevel}` : "战区入口受限";
   ui.lobbyProgress.textContent = scene.endless ? "六大修行地域循环 · 首领无限轮换" : `区域攻略 ${cleared} / ${LEVELS_PER_SCENE}`;

@@ -1912,6 +1912,66 @@ h1 {
 
 .low-power-device .system-alert,.low-power-device #lobbyHero.hero-single-sprite { animation:none!important; }
 
+/* v101: every retention system reads as a destination, not a repeated hero label. */
+.command-sidebar .system-card { --card-accent:var(--acid); }
+.command-sidebar .system-daily { --card-accent:#9ff7d4; }
+.command-sidebar .system-events { --card-accent:#ffd778; }
+.command-sidebar .system-dungeon { --card-accent:#8be8ff; }
+.command-sidebar .system-pet { --card-accent:#ffad6b; }
+.command-sidebar .system-skins { --card-accent:#d6a6ff; }
+.command-sidebar .system-card {
+  border-color:color-mix(in srgb,var(--card-accent) 34%,rgba(255,255,255,.08));
+  background:linear-gradient(155deg,color-mix(in srgb,var(--card-accent) 9%,rgba(12,28,31,.95)),rgba(2,9,12,.98) 70%);
+}
+.command-sidebar .system-card::after { background:linear-gradient(90deg,var(--card-accent),transparent); }
+.command-sidebar .system-card > i {
+  border-color:color-mix(in srgb,var(--card-accent) 38%,transparent);
+  color:#fff;
+  background:color-mix(in srgb,var(--card-accent) 17%,rgba(2,12,14,.82));
+  text-shadow:0 0 11px var(--card-accent);
+}
+.system-card-art {
+  inset:0;
+  width:auto;
+  height:auto;
+  background-size:cover;
+  background-position:center;
+  opacity:.5;
+  filter:saturate(.9) contrast(1.08) brightness(.78);
+  transform:none!important;
+  -webkit-mask-image:linear-gradient(110deg,transparent 0%,#000 38%,#000 100%);
+  mask-image:linear-gradient(110deg,transparent 0%,#000 38%,#000 100%);
+}
+.system-hero-art {
+  inset:3px -7px 8px 24px;
+  background-size:contain;
+  background-position:right bottom;
+  opacity:.68;
+  filter:saturate(.92) contrast(1.08) drop-shadow(-5px 7px 7px rgba(0,0,0,.66));
+}
+.system-event-art {
+  background-image:url("./assets/opening-splash-v1.jpg");
+  background-position:62% 38%;
+  opacity:.58;
+}
+.system-dungeon-art { background-position:center 54%;opacity:.62; }
+.system-pet-art {
+  inset:1px -9px 7px 21px;
+  background-size:300% auto;
+  background-position:left center;
+  opacity:.72;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 28%);
+  mask-image:linear-gradient(90deg,transparent,#000 28%);
+}
+.system-skin-art {
+  background-image:url("./assets/posters/original/hero-archetypes-v1.webp");
+  background-position:52% 34%;
+  opacity:.56;
+}
+.command-sidebar .system-card .system-card-copy b { letter-spacing:.03em;text-shadow:0 2px 7px #000,0 0 12px color-mix(in srgb,var(--card-accent) 24%,transparent); }
+.command-sidebar .system-card > em { border-color:color-mix(in srgb,var(--card-accent) 28%,transparent);color:color-mix(in srgb,var(--card-accent) 80%,white); }
+.low-power-device .system-card-art { filter:saturate(.82) contrast(1.06) brightness(.74); }
+
 @media (max-height:720px) {
   .command-panel { padding-right:88px; }
   .command-sidebar { width:80px;gap:5px; }
