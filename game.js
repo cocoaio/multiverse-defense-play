@@ -127,6 +127,7 @@ const sceneHeroSprites = Object.fromEntries(sceneIds.map((sceneId) => [sceneId, 
 const assetResolvedUrls = new Map();
 const battlefieldPatternCache = new WeakMap();
 const canvasWarmAssetCache = new WeakSet();
+let sceneAssetWarmReport = { sceneId: null, warmed: 0, flushed: false, canvas: "0x0" };
 
 const BOOT_ASSET_SIZES = {
   "./assets/opening-splash-v1.jpg": 642358,
@@ -332,6 +333,7 @@ function ensureSceneAssets(sceneId) {
     ...Object.values(sceneHeroSprites[sceneId] || {}),
     sceneId === "cultivation" ? cultivatorEnemyAtlas : sceneId === "city" ? cityZombieAtlas : enemyAtlas,
     companionAtlas,
+    themeVfxAtlas,
   ].filter(Boolean);
   assets.forEach(ensureImageLoaded);
   return assets;
@@ -344,16 +346,33 @@ async function prepareSceneAssets(sceneId) {
   // the texture to the Canvas backing store. Prime each scene asset while the
   // loading modal is still visible so the first combat frame does not hitch.
   const scratch = document.createElement("canvas");
-  scratch.width = scratch.height = 8;
+  // A tiny 8px draw only warms the decoded source on some desktop browsers.
+  // Mobile Safari/Chrome may still upload and resample the full texture on the
+  // first combat hit. Rasterize at representative battle size while the loadout
+  // veil is still visible, then force one readback so the upload cannot leak
+  // into the first live frame.
+  scratch.width = LOW_POWER_DEVICE ? 292 : W;
+  scratch.height = LOW_POWER_DEVICE ? 632 : H;
   const scratchContext = scratch.getContext("2d", { alpha: true });
+  let warmed = 0;
   for (const asset of assets) {
     if (!scratchContext || !asset.naturalWidth || canvasWarmAssetCache.has(asset)) continue;
     try {
-      scratchContext.clearRect(0, 0, 8, 8);
-      scratchContext.drawImage(asset, 0, 0, 8, 8);
+      const battlefield = asset === battlefieldTextures[sceneId];
+      const vfxAtlas = asset === themeVfxAtlas;
+      const targetWidth = battlefield ? scratch.width : vfxAtlas ? Math.min(292, scratch.width) : Math.min(196, scratch.width);
+      const targetHeight = battlefield ? scratch.height : vfxAtlas ? Math.min(292, scratch.height) : Math.min(236, scratch.height);
+      scratchContext.clearRect(0, 0, scratch.width, scratch.height);
+      scratchContext.drawImage(asset, 0, 0, asset.naturalWidth, asset.naturalHeight, 0, 0, targetWidth, targetHeight);
       canvasWarmAssetCache.add(asset);
+      warmed += 1;
     } catch (error) { /* The visible renderer retains its vector fallback. */ }
   }
+  let flushed = false;
+  if (scratchContext && warmed) {
+    try { scratchContext.getImageData(0, 0, 1, 1); flushed = true; } catch (error) { /* Best-effort GPU upload fence. */ }
+  }
+  sceneAssetWarmReport = { sceneId, warmed, flushed, canvas: `${scratch.width}x${scratch.height}` };
   return results.every(Boolean);
 }
 const W = 390;
@@ -9330,11 +9349,103 @@ function drawThemeProjectileSignature(bullet) {
   ctx.restore();
 }
 
+function traceThemeImpactSilhouette(sceneId, radius, progress) {
+  const spread = 1 + progress * .28;
+  ctx.beginPath();
+  if (sceneId === "city") {
+    ctx.moveTo(-radius * .42, -radius * .12); ctx.lineTo(-radius * .08, -radius * .45);
+    ctx.lineTo(radius * .38, -radius * .3); ctx.lineTo(radius * .72, -radius * .08);
+    ctx.lineTo(radius * .48, radius * .08); ctx.lineTo(radius * .66, radius * .32);
+    ctx.lineTo(radius * .06, radius * .44); ctx.lineTo(-radius * .44, radius * .16); ctx.closePath();
+  } else if (sceneId === "snow") {
+    ctx.moveTo(-radius * .34, 0);
+    for (const point of [[-.08,-.2],[.12,-.62],[.22,-.24],[.64,-.46],[.4,-.08],[.86,0],[.4,.08],[.64,.46],[.22,.24],[.12,.62],[-.08,.2]]) ctx.lineTo(radius * point[0] * spread, radius * point[1]);
+    ctx.closePath();
+  } else if (sceneId === "hospital") {
+    ctx.moveTo(-radius * .42, 0);
+    ctx.bezierCurveTo(-radius * .24, -radius * .48, radius * .3, -radius * .54, radius * .7, -radius * .12);
+    ctx.bezierCurveTo(radius * .48, radius * .04, radius * .72, radius * .18, radius * .38, radius * .42);
+    ctx.bezierCurveTo(-radius * .04, radius * .56, -radius * .32, radius * .34, -radius * .42, 0); ctx.closePath();
+  } else if (sceneId === "orbit") {
+    ctx.moveTo(-radius * .48, -radius * .1); ctx.lineTo(radius * .08, -radius * .38);
+    ctx.lineTo(radius * .86 * spread, 0); ctx.lineTo(radius * .08, radius * .38);
+    ctx.lineTo(-radius * .48, radius * .1); ctx.lineTo(-radius * .2, 0); ctx.closePath();
+  } else if (sceneId === "mars") {
+    ctx.moveTo(-radius * .46, -radius * .08); ctx.lineTo(-radius * .08, -radius * .34);
+    ctx.lineTo(radius * .14, -radius * .22); ctx.lineTo(radius * .46, -radius * .5);
+    ctx.lineTo(radius * .82 * spread, -radius * .06); ctx.lineTo(radius * .48, radius * .14);
+    ctx.lineTo(radius * .22, radius * .46); ctx.lineTo(-radius * .24, radius * .28); ctx.closePath();
+  } else if (sceneId === "moon") {
+    ctx.moveTo(-radius * .34, -radius * .42);
+    ctx.bezierCurveTo(radius * .2, -radius * .58, radius * .78, -radius * .34, radius * .82 * spread, 0);
+    ctx.bezierCurveTo(radius * .5, -radius * .1, radius * .02, radius * .12, -radius * .26, radius * .46);
+    ctx.bezierCurveTo(-radius * .02, radius * .14, -radius * .02, -radius * .12, -radius * .34, -radius * .42); ctx.closePath();
+  } else {
+    ctx.moveTo(-radius * .48, -radius * .16);
+    ctx.bezierCurveTo(-radius * .04, -radius * .46, radius * .48, -radius * .42, radius * .86 * spread, -radius * .1);
+    ctx.bezierCurveTo(radius * .38, -radius * .02, radius * .54, radius * .24, radius * .12, radius * .3);
+    ctx.bezierCurveTo(-radius * .08, radius * .38, -radius * .36, radius * .18, -radius * .48, -radius * .16); ctx.closePath();
+  }
+}
+
 function drawThemeImpactTexture(burst, progress, alpha) {
   const sceneId = burst.sceneId || game.scene.id;
-  const scale = burst.muzzle ? 42 : burst.critical ? 118 : burst.contactAttack ? 102 : 78;
+  const theme = getThemeCombatProfile(sceneId);
+  const scale = burst.muzzle ? 38 : burst.critical ? 74 : burst.contactAttack ? 66 : 54;
+  const radius = scale * (.82 + progress * .36);
   const reveal = Math.sin(Math.min(1, progress * 1.4) * Math.PI);
-  drawThemeAtlasCell(sceneId, scale * (.82 + progress * .42), alpha * reveal * (burst.muzzle ? .34 : .46), (burst.seed || .1) * .23 - progress * .12);
+  ctx.save();
+  traceThemeImpactSilhouette(sceneId, radius, progress);
+  ctx.fillStyle = colorAlpha(shade(theme.secondary, -68), alpha * reveal * (burst.muzzle ? .12 : .34));
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  traceThemeImpactSilhouette(sceneId, radius, progress);
+  ctx.clip();
+  drawThemeAtlasCell(sceneId, radius * 1.78, alpha * reveal * (burst.muzzle ? .28 : .56), (burst.seed || .1) * .1 - progress * .06);
+  ctx.restore();
+  ctx.save();
+  traceThemeImpactSilhouette(sceneId, radius, progress);
+  ctx.strokeStyle = colorAlpha(theme.secondary, alpha * reveal * .56);
+  ctx.lineWidth = Math.max(1, 2.2 - progress * 1.1);
+  ctx.stroke();
+  ctx.restore();
+  burst.themeSilhouetteRendered = true;
+  burst.themeSilhouette = sceneId;
+}
+
+function drawThemeContactCore(burst, progress, alpha) {
+  const sceneId = burst.sceneId || game.scene.id;
+  const theme = getThemeCombatProfile(sceneId);
+  const size = (burst.critical ? 18 : burst.contactAttack ? 15 : 11) * (1 - progress * .48);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = colorAlpha(theme.primary, .9);
+  ctx.strokeStyle = colorAlpha("#ffffff", .88);
+  ctx.lineWidth = Math.max(1, 2.1 - progress);
+  if (sceneId === "city") {
+    ctx.beginPath(); ctx.moveTo(-size * .7, -size * .22); ctx.lineTo(size * .18, -size * .5); ctx.lineTo(size, 0); ctx.lineTo(size * .12, size * .38); ctx.lineTo(-size * .72, size * .18); ctx.closePath(); ctx.fill(); ctx.stroke();
+  } else if (sceneId === "snow") {
+    for (let arm = 0; arm < 4; arm += 1) { ctx.save(); ctx.rotate(arm * Math.PI / 2); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(size, 0); ctx.lineTo(size * .42, size * .14); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  } else if (sceneId === "hospital") {
+    ctx.fillRect(-size * .16, -size * .72, size * .32, size * 1.44); ctx.fillRect(-size * .72, -size * .16, size * 1.44, size * .32);
+    ctx.beginPath(); ctx.ellipse(0, 0, size * .92, size * .54, progress * .6, 0, Math.PI * 2); ctx.stroke();
+  } else if (sceneId === "orbit") {
+    ctx.beginPath(); ctx.moveTo(-size, -size * .14); ctx.lineTo(size * .62, -size * .34); ctx.lineTo(size, 0); ctx.lineTo(size * .62, size * .34); ctx.lineTo(-size, size * .14); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(-size * .65, -1, size * 1.55, 2);
+  } else if (sceneId === "mars") {
+    ctx.beginPath(); ctx.moveTo(-size * .82, size * .38); ctx.lineTo(-size * .22, -size * .28); ctx.lineTo(size * .2, -size * .12); ctx.lineTo(size, -size * .64); ctx.lineTo(size * .56, size * .28); ctx.closePath(); ctx.fill(); ctx.stroke();
+  } else if (sceneId === "moon") {
+    ctx.beginPath(); ctx.arc(-size * .16, 0, size, -.92, .92); ctx.stroke();
+    ctx.beginPath(); ctx.arc(size * .26, 0, size * .72, Math.PI - .72, Math.PI + .72); ctx.stroke();
+  } else {
+    ctx.lineCap = "round"; ctx.lineWidth = Math.max(2, size * .24);
+    ctx.beginPath(); ctx.moveTo(-size, size * .36); ctx.quadraticCurveTo(-size * .06, -size * .48, size, -size * .18); ctx.stroke();
+    ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-size * .72, size * .58); ctx.lineTo(size * .82, size * .08); ctx.stroke();
+  }
+  ctx.restore();
+  burst.themeContactCoreRendered = true;
+  burst.themeContactCore = sceneId;
 }
 
 function drawProjectileTrail(bullet) {
@@ -9734,7 +9845,7 @@ function drawImpactBurst(burst) {
   }
   if (game.performance.quality > .58 && allowExpensiveGlow()) { ctx.shadowColor = burst.color; ctx.shadowBlur = 12; }
   else if (game.showcase) ctx.globalCompositeOperation = "lighter";
-  ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(1, 0, 7 * (1 - progress) + 2, 12 * (1 - progress) + 2, 0, 0, Math.PI * 2); ctx.fill();
+  if (!burst.muzzle) drawThemeContactCore(burst, progress, alpha);
   const slashFx = ["powerArc", "flameArc", "qiArc", "flyingSword", "spiritSword", "spiritPet"].includes(burst.fx);
   const shieldFx = ["disinfectant", "ionArc"].includes(burst.fx);
   const heavyFx = ["snowball", "gravityArc"].includes(burst.fx);
@@ -12129,6 +12240,7 @@ if (QA_MODE) {
         targetFps: game.performance.targetFps,
         limits: { ...EFFECT_LIMITS },
       },
+      assetWarm: { ...sceneAssetWarmReport },
       controls: {
         active: pointerMove.active,
         touchMode: pointerMove.touchMode,
@@ -12257,6 +12369,10 @@ if (QA_MODE) {
         atlasState: themeVfxAtlas.dataset.assetState || "unknown",
         themedBullets: game.bullets.filter((bullet) => bullet.themeId === game.scene.id).length,
         themedImpacts: game.impactBursts.filter((burst) => burst.sceneId === game.scene.id).length,
+        silhouetteImpacts: game.impactBursts.filter((burst) => burst.themeSilhouetteRendered).length,
+        contactCores: game.impactBursts.filter((burst) => burst.themeContactCoreRendered).length,
+        silhouettes: [...new Set(game.impactBursts.map((burst) => burst.themeSilhouette).filter(Boolean))],
+        coreThemes: [...new Set(game.impactBursts.map((burst) => burst.themeContactCore).filter(Boolean))],
         terrainMarked: game.lastThemeScarAt > -90,
       },
       projectileEvolution: {
