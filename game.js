@@ -2198,6 +2198,7 @@ function makeGame(runType = "main") {
     bossCinematic: null,
     bossPhaseOverlayRendered: false,
     combatMessageDirector: null,
+    actorClarity: null,
     lives: scene.endless ? 3 : 1,
     invulnerable: 0,
     pendingLevels: 0,
@@ -5923,6 +5924,7 @@ function render() {
       primaryBounds: null,
       compactBounds: [],
       overlapFree: true,
+      worldPrimary: false,
       theme: game.scene.id,
     };
     ctx.save();
@@ -6878,6 +6880,14 @@ function drawBattlefield() {
   const cinematic = game.bossCinematic;
   const cinematicEnvelope = getBossCinematicEnvelope();
   const cinematicComfort = preferences.reduceMotion ? .38 : 1;
+  game.actorClarity = {
+    active: false,
+    pressure: 0,
+    playerRestored: false,
+    bossRestored: false,
+    matteRendered: false,
+    theme: game.scene.id,
+  };
   const cinematicBlend = cinematic && game.boss ? cinematicEnvelope * (cinematic.type === "entrance" ? .68 : .36) * cinematicComfort : 0;
   const focusX = sequence && game.bossDemise ? game.player.x + (game.bossDemise.x - game.player.x) * .38 * focusProgress : game.boss ? game.player.x + (game.boss.x - game.player.x) * cinematicBlend : game.player.x;
   const focusY = sequence && game.bossDemise ? game.player.y + (game.bossDemise.y - game.player.y) * .32 * focusProgress : game.boss ? game.player.y + (game.boss.y - game.player.y) * cinematicBlend : game.player.y;
@@ -6974,9 +6984,93 @@ function drawBattlefield() {
   for (const warning of game.bossWarnings) {
     if (isWorldPointVisible(warning.x, warning.y, warning.radius + 38)) drawBossWarningOverlay(warning);
   }
+  drawActorClarityPass();
   ctx.globalAlpha = 1;
   for (const floater of game.floaters) if (isWorldPointVisible(floater.x, floater.y, 40)) drawFloater(floater);
   ctx.restore();
+}
+
+function getActorClarityPressure() {
+  const activeWarnings = game.bossWarnings.filter((warning) => !warning.detonated);
+  const impactWarnings = game.bossWarnings.filter((warning) => warning.detonated && warning.life > 0);
+  if (!activeWarnings.length && !impactWarnings.length) return 0;
+  const primaryCount = activeWarnings.filter((warning) => warning.warningRole !== "secondary").length;
+  const secondaryCount = activeWarnings.length - primaryCount;
+  return Math.min(1, .42 + primaryCount * .18 + secondaryCount * .09 + impactWarnings.length * .12);
+}
+
+function drawActorClarityMatte(actor, role, pressure) {
+  const isPlayer = role === "player";
+  const sceneId = game.scene.id;
+  const size = isPlayer ? (sceneId === "orbit" ? 58 : sceneId === "cultivation" ? 54 : 48) : actor.size * 1.36;
+  const centerY = isPlayer ? -7 : -actor.size * .24;
+  const alpha = (LOW_POWER_DEVICE ? .2 : .27) * pressure;
+  ctx.save(); ctx.translate(actor.x, actor.y);
+  const matte = ctx.createRadialGradient(0, centerY, size * .12, 0, centerY, size);
+  matte.addColorStop(0, `rgba(2,4,7,${alpha})`);
+  matte.addColorStop(.58, `rgba(2,4,7,${alpha * .82})`);
+  matte.addColorStop(1, "rgba(2,4,7,0)");
+  ctx.fillStyle = matte;
+  ctx.beginPath(); ctx.ellipse(0, centerY, size * .76, size, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function drawActorClarityRim(actor, role, pressure) {
+  const isPlayer = role === "player";
+  const color = isPlayer ? game.scene.colors.shot : getBossSignature().color;
+  const size = isPlayer ? (game.scene.id === "orbit" ? 52 : 45) : actor.size * 1.18;
+  const centerY = isPlayer ? -6 : -actor.size * .22;
+  ctx.save(); ctx.translate(actor.x, actor.y + centerY);
+  ctx.globalAlpha = (LOW_POWER_DEVICE ? .62 : .78) * pressure;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = isPlayer ? 1.45 : 1.8;
+  ctx.lineCap = "round";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * size * .54, -size * .62);
+    ctx.quadraticCurveTo(side * size * .75, -size * .12, side * size * .6, size * .48);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(side * size * .42, size * .62);
+    ctx.lineTo(side * size * .18, size * .82);
+    ctx.stroke();
+  }
+  if (isPlayer) {
+    ctx.strokeStyle = colorAlpha(game.scene.colors.hit, .88);
+    ctx.beginPath(); ctx.arc(0, size * .56, size * .52, .18, Math.PI - .18); ctx.stroke();
+  } else {
+    ctx.strokeStyle = colorAlpha(color, .76);
+    ctx.beginPath(); ctx.arc(0, -size * .35, size * .72, Math.PI * 1.12, Math.PI * 1.88); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawActorClarityPass() {
+  const pressure = getActorClarityPressure();
+  if (pressure <= 0) return;
+  const state = game.actorClarity;
+  state.active = true;
+  state.pressure = Number(pressure.toFixed(2));
+  const playerThreatened = game.bossWarnings.some((warning) => {
+    const distance = Math.hypot(warning.x - game.player.x, warning.y - game.player.y);
+    return distance <= warning.radius + 42;
+  });
+  const bossVisible = game.boss && !game.boss.dead && isWorldPointVisible(game.boss.x, game.boss.y, game.boss.size + 48);
+
+  if (playerThreatened) {
+    drawActorClarityMatte(game.player, "player", pressure);
+    drawPlayerBodyOnly();
+    drawActorClarityRim(game.player, "player", pressure);
+    state.playerRestored = true;
+    state.matteRendered = true;
+  }
+  if (bossVisible) {
+    drawActorClarityMatte(game.boss, "boss", pressure);
+    drawEnemy(game.boss, true);
+    drawActorClarityRim(game.boss, "boss", pressure);
+    state.bossRestored = true;
+    state.matteRendered = true;
+  }
 }
 
 function isWorldPointVisible(x, y, margin = 72) {
@@ -8779,7 +8873,7 @@ function drawEnemyMeleeActionLayer(enemy, s) {
   ctx.restore();
 }
 
-function drawEnemy(enemy) {
+function drawEnemy(enemy, clarityPass = false) {
   const s = enemy.size;
   const frozen = enemy.slowTimer > 0;
   ctx.save();
@@ -8859,8 +8953,10 @@ function drawEnemy(enemy) {
     ctx.rotate((enemy.bossReactionSide || 1) * reaction * .075);
     ctx.scale(1 + reaction * .06, 1 - reaction * .09);
   }
-  drawBossDamageState(enemy, s, "back");
-  drawBossSignatureLayer(enemy, s, "back");
+  if (!clarityPass) {
+    drawBossDamageState(enemy, s, "back");
+    drawBossSignatureLayer(enemy, s, "back");
+  }
   if (game.scene.id === "cultivation") drawCultivationEnemy(enemy, s, frozen);
   else if (game.scene.id === "city" && cityZombieAtlas.complete && cityZombieAtlas.naturalWidth) drawCityZombieEnemy(enemy, s, frozen);
   else if (enemyAtlas.complete && enemyAtlas.naturalWidth) drawAtlasEnemy(enemy, s, frozen);
@@ -8872,11 +8968,13 @@ function drawEnemy(enemy) {
     if (game.scene.id === "moon") drawLunarEnemy(enemy, s, frozen);
   }
   if (bossCinematic) ctx.shadowBlur = 0;
-  drawEnemyMeleeActionLayer(enemy, s);
-  drawEnemyHitReactionLayer(enemy, s, reactionPulse);
-  drawBossDamageState(enemy, s, "front");
-  if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
-  if (!LOW_POWER_DEVICE) drawBossSignatureLayer(enemy, s, "front");
+  if (!clarityPass) {
+    drawEnemyMeleeActionLayer(enemy, s);
+    drawEnemyHitReactionLayer(enemy, s, reactionPulse);
+    drawBossDamageState(enemy, s, "front");
+    if (enemy.type === "ranged" || enemy.type === "caster") drawEnemyWeaponRole(enemy, s);
+    if (!LOW_POWER_DEVICE) drawBossSignatureLayer(enemy, s, "front");
+  }
 
   if (frozen) {
     ctx.strokeStyle = "rgba(151,235,255,.72)";
@@ -8889,6 +8987,7 @@ function drawEnemy(enemy) {
     ctx.beginPath(); ctx.arc(0, 0, s * 1.16, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
+  if (clarityPass) return;
   drawBossPhaseAura(enemy, s);
   drawEnemyAttackCue(enemy, s);
 
@@ -10811,6 +10910,39 @@ function drawBase() {
   ctx.restore();
 }
 
+function drawPlayerBodyOnly() {
+  const player = game.player;
+  const moving = Math.hypot(game.move.x, game.move.y) > .05 || movementKeys.size > 0;
+  const stride = Math.sin(player.walkPhase);
+  const staticOrbitCraft = game.scene.id === "orbit" && player.combatClass.id === "melee";
+  const bob = staticOrbitCraft ? 0 : moving ? -Math.abs(Math.sin(player.walkPhase)) * .22 : Math.sin(game.elapsed * 2.5) * .38;
+  const attack = player.attackAnim;
+  const facing = Math.cos(player.aimAngle) < 0 ? -1 : 1;
+  const attackEase = Math.sin(attack * Math.PI);
+  const craftRecoil = game.scene.id === "orbit" ? (player.combatClass.id === "ranger" ? -7 : 3) * attackEase : 0;
+  ctx.save();
+  if (game.invulnerable > 0) ctx.globalAlpha = .58 + Math.sin(game.elapsed * 24) * .2;
+  ctx.translate(player.x + Math.cos(player.aimAngle) * craftRecoil, player.y + bob + Math.sin(player.aimAngle) * craftRecoil);
+  ctx.rotate(staticOrbitCraft ? 0 : (moving ? stride * .025 : 0));
+  if (game.scene.id === "orbit") ctx.scale(1 + attackEase * .025, 1 - attackEase * .018);
+  if (game.scene.id !== "orbit") ctx.scale(facing, 1);
+  if (game.scene.id === "orbit") {
+    drawOrbitCraft(player, moving, stride, attackEase);
+  } else if (game.scene.id === "cultivation") {
+    drawCultivationAvatar(player, attack, facing);
+  } else {
+    const activeSprite = getHeroSprite(game.scene.id, player.combatClass.id);
+    let rendered = false;
+    if (isAssetRenderable(activeSprite)) {
+      const width = game.scene.id === "hospital" ? 86 : 78;
+      const height = game.scene.id === "hospital" ? 115 : 104;
+      rendered = drawAnimatedHeroSprite(activeSprite, 0, activeSprite.naturalWidth, width, height, moving, stride, attack, player.combatClass.id, game.scene.id);
+    }
+    if (!rendered) drawFallbackPlayerAvatar(player, moving, stride, attack, game.scene.id);
+  }
+  ctx.restore();
+}
+
 function drawEquipmentCombatAura(player) {
   const bonuses = getEquippedBonuses(player.combatClass.id);
   const equippedCount = Object.values(getClassGear(player.combatClass.id)).filter(Boolean).length;
@@ -11267,11 +11399,16 @@ function drawBanner() {
   const alpha = Math.min(1, banner.time * 1.8, reveal);
   const director = game.combatMessageDirector || { primary: null, deferred: [], fullCards: 0, compactCards: 0, compactBounds: [] };
   const phaseIsPrimary = director.primary === "boss-phase";
+  const dangerIsPrimary = !phaseIsPrimary && game.bossWarnings.some((warning) => !warning.detonated && warning.warningRole !== "secondary");
+  if (dangerIsPrimary) {
+    director.primary = "boss-danger";
+    director.worldPrimary = true;
+  }
   const accent = game.scene.colors.shot;
   ctx.save();
   ctx.globalAlpha = Math.max(0, alpha);
 
-  if (phaseIsPrimary) {
+  if (phaseIsPrimary || dangerIsPrimary) {
     const width = Math.min(178, W - 28);
     const height = 50;
     const bounds = chooseCompactCombatMessageBounds(width, height, director.primaryBounds);
@@ -12066,8 +12203,10 @@ if (QA_MODE) {
         overlapFree: game.combatMessageDirector.overlapFree,
         primaryBounds: game.combatMessageDirector.primaryBounds,
         compactBounds: game.combatMessageDirector.compactBounds,
+        worldPrimary: game.combatMessageDirector.worldPrimary,
         theme: game.combatMessageDirector.theme,
       } : null,
+      actorClarity: game.actorClarity ? { ...game.actorClarity } : null,
       bossCinematic: game.bossCinematic ? {
         type: game.bossCinematic.type,
         phase: game.bossCinematic.phase,
