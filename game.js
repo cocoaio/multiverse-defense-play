@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
-const ASSET_REVISION = "90";
+const ASSET_REVISION = "100";
 const LOW_POWER_DEVICE = document.documentElement.classList.contains("low-power-device")
   || (navigator.deviceMemory && navigator.deviceMemory <= 4)
   || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
@@ -599,6 +599,40 @@ const EFFECT_LIMITS = LOW_POWER_DEVICE
   : MOBILE_DEVICE
     ? { particles: 148, floaters: 32, bursts: 34, shockwaves: 26, corpses: 34, xpDrops: 76, medkits: 15, bullets: 112 }
     : { particles: 360, floaters: 62, bursts: 82, shockwaves: 64, corpses: 90, xpDrops: 150, medkits: 24, bullets: 200 };
+const EFFECT_MINIMUMS = { particles: 44, floaters: 14, bursts: 12, shockwaves: 10, corpses: 14, xpDrops: 34, medkits: 8, bullets: 48 };
+function applyPerformanceEnvelope(performanceState, resetQuality = false) {
+  if (!performanceState) return;
+  performanceState.qualityCeiling = PERFORMANCE_PROFILE.qualityCeiling;
+  performanceState.qualityFloor = PERFORMANCE_PROFILE.qualityFloor;
+  performanceState.targetFps = PERFORMANCE_PROFILE.targetFps;
+  performanceState.quality = resetQuality
+    ? PERFORMANCE_PROFILE.qualityCeiling
+    : Math.min(performanceState.qualityCeiling, Math.max(performanceState.qualityFloor, performanceState.quality));
+}
+function getDynamicEffectLimit(key) {
+  const base = EFFECT_LIMITS[key];
+  if (!game?.performance || !Number.isFinite(base)) return base;
+  const quality = Math.min(1, Math.max(.3, game.performance.quality));
+  const pressure = game.performance.slowFrames >= 10 ? .6 : game.performance.slowFrames >= 4 ? .78 : 1;
+  const scale = Math.min(1, (.48 + quality * .52) * pressure);
+  return Math.max(EFFECT_MINIMUMS[key] || 1, Math.round(base * scale));
+}
+function retainInPlace(items, keep) {
+  let writeIndex = 0;
+  for (let readIndex = 0; readIndex < items.length; readIndex += 1) {
+    const item = items[readIndex];
+    if (keep(item, readIndex)) items[writeIndex++] = item;
+  }
+  items.length = writeIndex;
+  return items;
+}
+const keepUncollected = (item) => !item.collected;
+const keepAlive = (item) => item.life > 0;
+const keepTimedZone = (item) => item.time > 0;
+const keepNotDead = (item) => !item.dead;
+const keepActiveMedkit = (item) => !item.collected && item.age < 22;
+const keepBossWarning = (item) => !item.detonated || item.life > 0;
+const keepAirstrike = (item) => !item.exploded || item.life > 0;
 function allowExpensiveGlow() {
   return !LOW_POWER_DEVICE && (game?.performance?.quality ?? 1) >= .64;
 }
@@ -2173,9 +2207,9 @@ function makeGame(runType = "main") {
     spawnTimer: 0.45,
     shotTimer: 0.1,
     performance: {
-      quality: showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling,
-      qualityCeiling: showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling,
-      qualityFloor: showcase ? 1 : PERFORMANCE_PROFILE.qualityFloor,
+      quality: PERFORMANCE_PROFILE.qualityCeiling,
+      qualityCeiling: PERFORMANCE_PROFILE.qualityCeiling,
+      qualityFloor: PERFORMANCE_PROFILE.qualityFloor,
       targetFps: PERFORMANCE_PROFILE.targetFps,
       slowFrames: 0,
       frameMs: 1000 / PERFORMANCE_PROFILE.targetFps,
@@ -2295,9 +2329,9 @@ function configureShowcaseBuild(state) {
   state.divineTrialActive = true;
   state.divineAwakening = 2.15;
   state.divineOverdrive = 180;
-  state.performance.quality = 1;
-  state.performance.qualityCeiling = 1;
-  state.performance.qualityFloor = 1;
+  // Maximum combat power must not disable the renderer's frame governor.
+  // The previous quality=1 lock made the forced tutorial the heaviest scene.
+  applyPerformanceEnvelope(state.performance, true);
   player.damage = LOW_POWER_DEVICE ? 3280 : 1280;
   player.fireInterval = LOW_POWER_DEVICE ? .18 : .14;
   player.bulletCount = LOW_POWER_DEVICE ? 3 : 6;
@@ -2766,7 +2800,7 @@ function updateXpDrops(dt) {
       }
     }
   }
-  game.xpDrops = game.xpDrops.filter((drop) => !drop.collected);
+  retainInPlace(game.xpDrops, keepUncollected);
 }
 
 function updateMedkits(dt) {
@@ -2792,7 +2826,7 @@ function updateMedkits(dt) {
       tone(640, .12, "sine", .03, 1.45);
     }
   }
-  game.medkits = game.medkits.filter((kit) => !kit.collected && kit.age < 22);
+  retainInPlace(game.medkits, keepActiveMedkit);
 }
 
 function spawnGearDrop(item, x, y) {
@@ -2859,7 +2893,7 @@ function updateGearDrops(dt) {
     }
     if (distance < 24) collectGearDrop(drop);
   }
-  game.gearDrops = game.gearDrops.filter((drop) => !drop.collected);
+  retainInPlace(game.gearDrops, keepUncollected);
 }
 
 function activateDivineGearTrial() {
@@ -3662,7 +3696,7 @@ function updateDerivedCombatMechanics(dt) {
     makeDirectionalParticles(zone.x, zone.y, zone.color, LOW_POWER_DEVICE ? 3 : 5, 78, zone.pulses * 1.7, 1.5, "glyph");
     if (game.lastDerivedMechanic?.style === "ritualSwarm") game.lastDerivedMechanic.pulses = zone.pulses;
   }
-  game.derivedZones = game.derivedZones.filter((zone) => zone.time > 0);
+  retainInPlace(game.derivedZones, keepTimedZone);
 }
 
 function updateBullets(dt) {
@@ -3737,8 +3771,9 @@ function updateBullets(dt) {
       else bullet.dead = true;
     }
   }
-  game.bullets = game.bullets.filter((bullet) => !bullet.dead);
-  if (game.bullets.length > EFFECT_LIMITS.bullets) game.bullets.splice(0, game.bullets.length - EFFECT_LIMITS.bullets);
+  retainInPlace(game.bullets, keepNotDead);
+  const bulletLimit = getDynamicEffectLimit("bullets");
+  if (game.bullets.length > bulletLimit) game.bullets.splice(0, game.bullets.length - bulletLimit);
 }
 
 function applyAttackIdentity(bullet, enemy, x, y, angle) {
@@ -4153,7 +4188,7 @@ function updateEnemies(dt) {
     enemy.isMoving = distanceMoved > .025 && enemy.attackWindup <= 0;
     if (enemy.isMoving) enemy.walkPhase += distanceMoved * (enemy.type === "runner" ? .43 : .3);
   }
-  game.enemies = game.enemies.filter((enemy) => !enemy.dead);
+  retainInPlace(game.enemies, keepNotDead);
 }
 
 function fireEnemyProjectile(enemy, targetX = game.player.x, targetY = game.player.y) {
@@ -4220,7 +4255,7 @@ function updateEnemyProjectiles(dt) {
     applyEnemyProjectileEffect(projectile);
     damagePlayer(projectile.damage, projectile.x, projectile.y, false);
   }
-  game.enemyProjectiles = game.enemyProjectiles.filter((projectile) => !projectile.dead);
+  retainInPlace(game.enemyProjectiles, keepNotDead);
 }
 
 function createBossScar(warning) {
@@ -4278,7 +4313,7 @@ function updateBossWarnings(dt) {
       }
     } else warning.life -= dt;
   }
-  game.bossWarnings = game.bossWarnings.filter((warning) => !warning.detonated || warning.life > 0);
+  retainInPlace(game.bossWarnings, keepBossWarning);
 }
 
 function damagePlayer(rawDamage, sourceX, sourceY, heavy = false) {
@@ -4528,7 +4563,7 @@ function killEnemy(enemy) {
   }
   const shardCount = enemy.type === "boss" ? 6 : enemy.xp >= 18 ? 3 : 1;
   const xpColor = game.scene.id === "hospital" ? "#78ffd1" : game.scene.id === "mars" ? "#ffc26d" : game.scene.id === "cultivation" ? "#ffe6a2" : game.scene.colors.shot;
-  if (game.xpDrops.length + shardCount > EFFECT_LIMITS.xpDrops) {
+  if (game.xpDrops.length + shardCount > getDynamicEffectLimit("xpDrops")) {
     const pooled = game.xpDrops[game.kills % Math.max(1, game.xpDrops.length)];
     if (pooled) { pooled.value += enemy.xp; pooled.x = enemy.x; pooled.y = enemy.y; pooled.age = 0; pooled.color = xpColor; }
   } else {
@@ -4559,7 +4594,7 @@ function killEnemy(enemy) {
     addFloater(enemy.x, enemy.y - enemy.size - 4, "急救血包", "#7dffac", 9);
   }
   if (!bossVictoryReady) {
-    if (game.corpses.length >= EFFECT_LIMITS.corpses) game.corpses.shift();
+    if (game.corpses.length >= getDynamicEffectLimit("corpses")) game.corpses.shift();
     const deathProfile = getCorpseDeathProfile();
     const impactAngle = Number.isFinite(enemy.hitAngle) ? enemy.hitAngle : Math.atan2(enemy.y - game.player.y, enemy.x - game.player.x);
     game.corpses.push({
@@ -5034,7 +5069,7 @@ function updateEffects(dt) {
           if (strike.delay <= 0) detonateAirstrike(strike);
         } else strike.life -= dt;
       }
-      game.airstrikes = game.airstrikes.filter((strike) => !strike.exploded || strike.life > 0);
+      retainInPlace(game.airstrikes, keepAirstrike);
     }
     if (ultimate.time <= 0 && (ultimate.family !== "barrage" || game.airstrikes.length === 0)) game.ultimate = null;
   }
@@ -5071,23 +5106,26 @@ function updateEffects(dt) {
     game.cinematicImpact.time -= dt;
     if (game.cinematicImpact.time <= 0) game.cinematicImpact = null;
   }
-  game.particles = game.particles.filter((particle) => particle.life > 0);
-  game.floaters = game.floaters.filter((floater) => floater.life > 0);
-  game.shockwaves = game.shockwaves.filter((wave) => wave.life > 0);
-  game.corpses = game.corpses.filter((corpse) => corpse.life > 0);
-  game.lightnings = game.lightnings.filter((lightning) => lightning.life > 0);
-  game.impactBursts = game.impactBursts.filter((burst) => burst.life > 0);
-  game.groundMarks = game.groundMarks.filter((mark) => mark.life > 0);
-  game.bossScars = game.bossScars.filter((scar) => scar.life > 0);
-  game.bossAttackBridges = game.bossAttackBridges.filter((bridge) => bridge.life > 0);
-  if (game.particles.length > EFFECT_LIMITS.particles) game.particles.splice(0, game.particles.length - EFFECT_LIMITS.particles);
-  if (game.impactBursts.length > EFFECT_LIMITS.bursts) game.impactBursts.splice(0, game.impactBursts.length - EFFECT_LIMITS.bursts);
-  if (game.shockwaves.length > EFFECT_LIMITS.shockwaves) game.shockwaves.splice(0, game.shockwaves.length - EFFECT_LIMITS.shockwaves);
+  retainInPlace(game.particles, keepAlive);
+  retainInPlace(game.floaters, keepAlive);
+  retainInPlace(game.shockwaves, keepAlive);
+  retainInPlace(game.corpses, keepAlive);
+  retainInPlace(game.lightnings, keepAlive);
+  retainInPlace(game.impactBursts, keepAlive);
+  retainInPlace(game.groundMarks, keepAlive);
+  retainInPlace(game.bossScars, keepAlive);
+  retainInPlace(game.bossAttackBridges, keepAlive);
+  const particleLimit = getDynamicEffectLimit("particles");
+  const burstLimit = getDynamicEffectLimit("bursts");
+  const shockwaveLimit = getDynamicEffectLimit("shockwaves");
+  if (game.particles.length > particleLimit) game.particles.splice(0, game.particles.length - particleLimit);
+  if (game.impactBursts.length > burstLimit) game.impactBursts.splice(0, game.impactBursts.length - burstLimit);
+  if (game.shockwaves.length > shockwaveLimit) game.shockwaves.splice(0, game.shockwaves.length - shockwaveLimit);
 }
 
 function makeParticles(x, y, color, count, speed) {
   const quality = game?.performance?.quality || 1;
-  const allowed = Math.max(0, Math.min(Math.ceil(count * quality), EFFECT_LIMITS.particles - game.particles.length));
+  const allowed = Math.max(0, Math.min(Math.ceil(count * quality), getDynamicEffectLimit("particles") - game.particles.length));
   for (let i = 0; i < allowed; i += 1) {
     const angle = rand(0, Math.PI * 2);
     const velocity = rand(speed * 0.25, speed);
@@ -5106,7 +5144,7 @@ function makeParticles(x, y, color, count, speed) {
 
 function makeDirectionalParticles(x, y, color, count, speed, angle, spread = .9, shape = "spark") {
   const quality = game?.performance?.quality || 1;
-  const allowed = Math.max(0, Math.min(Math.ceil(count * quality), EFFECT_LIMITS.particles - game.particles.length));
+  const allowed = Math.max(0, Math.min(Math.ceil(count * quality), getDynamicEffectLimit("particles") - game.particles.length));
   for (let i = 0; i < allowed; i += 1) {
     const particleAngle = angle + rand(-spread, spread);
     const velocity = rand(speed * .38, speed);
@@ -5128,7 +5166,8 @@ function makeDirectionalParticles(x, y, color, count, speed, angle, spread = .9,
 }
 
 function addFloater(x, y, text, color, size) {
-  if (game.floaters.length >= EFFECT_LIMITS.floaters) game.floaters.splice(0, game.floaters.length - EFFECT_LIMITS.floaters + 1);
+  const floaterLimit = getDynamicEffectLimit("floaters");
+  if (game.floaters.length >= floaterLimit) game.floaters.splice(0, game.floaters.length - floaterLimit + 1);
   game.floaters.push({ x, y, text, color, size, life: 0.58 });
 }
 
@@ -5935,17 +5974,16 @@ function render() {
   drawBackground();
 
   if (game) {
-    game.combatMessageDirector = {
-      primary: null,
-      deferred: [],
-      fullCards: 0,
-      compactCards: 0,
-      primaryBounds: null,
-      compactBounds: [],
-      overlapFree: true,
-      worldPrimary: false,
-      theme: game.scene.id,
-    };
+    const messageDirector = game.combatMessageDirector ||= { deferred: [], compactBounds: [] };
+    messageDirector.primary = null;
+    messageDirector.deferred.length = 0;
+    messageDirector.fullCards = 0;
+    messageDirector.compactCards = 0;
+    messageDirector.primaryBounds = null;
+    messageDirector.compactBounds.length = 0;
+    messageDirector.overlapFree = true;
+    messageDirector.worldPrimary = false;
+    messageDirector.theme = game.scene.id;
     ctx.save();
     if (!preferences.reduceMotion && game.shake > 0) ctx.translate(rand(-game.shake, game.shake), rand(-game.shake, game.shake));
     drawBattlefield();
@@ -6958,18 +6996,23 @@ function drawBattlefield() {
   // Player and enemies share one Canvas2D actor layer. Sorting by their
   // ground-contact point makes feet, shadows and bodies occlude naturally.
   const petPosition = game.player.companionPet ? getCompanionPetPosition() : null;
-  const companionActor = petPosition ? { companion: true, ...petPosition } : null;
-  const visibleEnemies = game.enemies.filter((enemy) => isWorldPointVisible(enemy.x, enemy.y, enemy.size + 48));
+  const companionActor = petPosition ? (game.companionRenderActor ||= { companion: true }) : null;
+  if (companionActor) Object.assign(companionActor, petPosition);
+  const actors = game.renderActors ||= [];
+  actors.length = 0;
   game.enemyArticulationRendered = 0;
-  for (const enemy of visibleEnemies) {
+  for (const enemy of game.enemies) {
+    if (!isWorldPointVisible(enemy.x, enemy.y, enemy.size + 48)) continue;
     enemy.locomotionPoseRendered = false;
     enemy.footPlantRendered = false;
     enemy.meleeAttackPoseRendered = false;
     enemy.meleeAttackStageRendered = "idle";
     enemy.meleeCueRendered = false;
     enemy.meleeActionRendered = false;
+    actors.push(enemy);
   }
-  const actors = [...visibleEnemies, game.player, ...(companionActor ? [companionActor] : [])];
+  actors.push(game.player);
+  if (companionActor) actors.push(companionActor);
   actors.sort((a, b) => {
     const aDepth = a === game.player ? a.y + 30 : a.companion ? a.y + 19 : a.y + a.size * .92;
     const bDepth = b === game.player ? b.y + 30 : b.companion ? b.y + 19 : b.y + b.size * .92;
@@ -7010,12 +7053,17 @@ function drawBattlefield() {
 }
 
 function getActorClarityPressure() {
-  const activeWarnings = game.bossWarnings.filter((warning) => !warning.detonated);
-  const impactWarnings = game.bossWarnings.filter((warning) => warning.detonated && warning.life > 0);
-  if (!activeWarnings.length && !impactWarnings.length) return 0;
-  const primaryCount = activeWarnings.filter((warning) => warning.warningRole !== "secondary").length;
-  const secondaryCount = activeWarnings.length - primaryCount;
-  return Math.min(1, .42 + primaryCount * .18 + secondaryCount * .09 + impactWarnings.length * .12);
+  let primaryCount = 0;
+  let secondaryCount = 0;
+  let impactCount = 0;
+  for (const warning of game.bossWarnings) {
+    if (warning.detonated) {
+      if (warning.life > 0) impactCount += 1;
+    } else if (warning.warningRole === "secondary") secondaryCount += 1;
+    else primaryCount += 1;
+  }
+  if (!primaryCount && !secondaryCount && !impactCount) return 0;
+  return Math.min(1, .42 + primaryCount * .18 + secondaryCount * .09 + impactCount * .12);
 }
 
 function drawActorClarityMatte(actor, role, pressure) {
@@ -8109,7 +8157,9 @@ function drawWorldDecor() {
 
 function drawWorldTexture(texture, left, right, top, bottom, sceneId) {
   const arenaSize = sceneId === "cultivation" ? 1080 : 980;
-  if (LOW_POWER_DEVICE && game.showcase) {
+  const useCachedPattern = Boolean(game.showcase || MOBILE_DEVICE || game.performance?.quality < .88 || game.performance?.slowFrames >= 2);
+  if (game?.performance) game.performance.backgroundMode = useCachedPattern ? "cached-pattern" : "mirrored-tiles";
+  if (useCachedPattern) {
     let pattern = battlefieldPatternCache.get(texture);
     if (!pattern) {
       pattern = ctx.createPattern(texture, "repeat");
@@ -11661,10 +11711,7 @@ function applyPreferences(persist = true) {
   ui.mute.textContent = muted ? "×" : "⌁";
   ui.mute.setAttribute("aria-label", muted ? "开启音效" : "关闭音效");
   if (game) {
-    game.performance.qualityCeiling = game.showcase ? 1 : PERFORMANCE_PROFILE.qualityCeiling;
-    game.performance.qualityFloor = game.showcase ? 1 : PERFORMANCE_PROFILE.qualityFloor;
-    game.performance.targetFps = PERFORMANCE_PROFILE.targetFps;
-    game.performance.quality = game.showcase ? 1 : Math.min(PERFORMANCE_PROFILE.qualityCeiling, Math.max(PERFORMANCE_PROFILE.qualityFloor, game.performance.quality));
+    applyPerformanceEnvelope(game.performance, false);
     if (preferences.reduceMotion) game.shake = 0;
   }
   if (persist) savePreferences();
@@ -11813,9 +11860,12 @@ function frame(now) {
   lastFrame = now;
   nextFrameAt = now + frameInterval;
   ambienceTime += dt;
-  if (game && rawDt < .1) {
+  // A visible frame taking over 100 ms is exactly when the governor must react.
+  // The old guard skipped adaptation on the worst stalls, leaving quality at 1.
+  // Hidden-tab gaps remain ignored so returning to the game does not downgrade it.
+  if (game && !document.hidden && rawDt > 0) {
     const performanceState = game.performance;
-    const measuredMs = rawDt * 1000;
+    const measuredMs = Math.min(200, rawDt * 1000);
     const budgetMs = 1000 / performanceState.targetFps;
     performanceState.frameMs += (measuredMs - performanceState.frameMs) * .1;
     performanceState.slowFrames = measuredMs > budgetMs * 1.22
@@ -12233,12 +12283,17 @@ if (QA_MODE) {
       performance: {
         profile: PERFORMANCE_PROFILE.name,
         quality: Number(game.performance.quality.toFixed(2)),
+        qualityCeiling: game.performance.qualityCeiling,
+        qualityFloor: game.performance.qualityFloor,
+        slowFrames: game.performance.slowFrames,
         frameMs: Number(game.performance.frameMs.toFixed(1)),
         renderCostMs: Number(game.performance.renderCostMs.toFixed(2)),
         peakRenderCostMs: Number(game.performance.peakRenderCostMs.toFixed(2)),
         ultimatePeakRenderMs: Number(game.performance.ultimatePeakRenderMs.toFixed(2)),
         targetFps: game.performance.targetFps,
+        backgroundMode: game.performance.backgroundMode || "procedural",
         limits: { ...EFFECT_LIMITS },
+        dynamicLimits: Object.fromEntries(Object.keys(EFFECT_LIMITS).map((key) => [key, getDynamicEffectLimit(key)])),
       },
       assetWarm: { ...sceneAssetWarmReport },
       controls: {
